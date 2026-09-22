@@ -6,12 +6,24 @@ import jsQR from "jsqr";
  * continuously scans incoming frames for a QR code using jsQR, and calls
  * onResult(text) exactly once as soon as a code is decoded.
  */
+// Decoding is done on a downscaled copy of the video frame, not the raw
+// camera resolution. jsQR's cost scales with pixel count, so scanning a
+// full 1920x1080 frame (~2M px) instead of a ~480px-wide copy (~80K px)
+// is over 20x slower for no accuracy benefit — that's what made the old
+// version feel stuck/slow on phones.
+const DECODE_WIDTH = 480;
+// Cap scan attempts instead of running one every animation frame (up to
+// 60/sec). 12/sec is still instant-feeling to a human and leaves the
+// device far less loaded, which also helps camera autofocus keep up.
+const SCAN_INTERVAL_MS = 80;
+
 export default function CameraScanner({ onResult, active }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(document.createElement("canvas"));
   const streamRef = useRef(null);
   const rafRef = useRef(null);
   const hasResultRef = useRef(false);
+  const lastScanRef = useRef(0);
 
   const [status, setStatus] = useState("starting"); // starting | ready | denied | unsupported | insecure
   const [torchOn, setTorchOn] = useState(false);
@@ -56,8 +68,17 @@ export default function CameraScanner({ onResult, active }) {
         return;
       }
       try {
+        // Ask the camera itself for a moderate resolution. Requesting the
+        // sensor's max (often 4K on modern phones) means every frame has
+        // to be captured, transferred and JS-decoded at that size before
+        // we even get a chance to downscale it — slower to start and
+        // slower per frame. 1280x720 is plenty to read a QR code.
         const stream = await getUserMediaCompat({
-          video: { facingMode: { ideal: "environment" } },
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: false,
         });
         if (cancelled) {
@@ -79,26 +100,41 @@ export default function CameraScanner({ onResult, active }) {
       }
     }
 
-    function tick() {
+    function tick(timestamp) {
       if (cancelled || hasResultRef.current) return;
-      const video = videoRef.current;
-      if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-        const canvas = canvasRef.current;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: "dontInvert",
-        });
-        if (code && code.data) {
-          hasResultRef.current = true;
-          onResult(code.data);
-          return;
-        }
-      }
       rafRef.current = requestAnimationFrame(tick);
+
+      // Throttle: skip this frame unless enough time has passed since the
+      // last decode attempt. Keeps CPU usage (and therefore lag) low
+      // without any visible delay to the person scanning.
+      if (timestamp - lastScanRef.current < SCAN_INTERVAL_MS) return;
+
+      const video = videoRef.current;
+      if (!video || video.readyState !== video.HAVE_ENOUGH_DATA || !video.videoWidth) return;
+      lastScanRef.current = timestamp;
+
+      // Downscale the frame before decoding — this is the main speedup.
+      const scale = Math.min(1, DECODE_WIDTH / video.videoWidth);
+      const w = Math.round(video.videoWidth * scale);
+      const h = Math.round(video.videoHeight * scale);
+
+      const canvas = canvasRef.current;
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      // "attemptBoth" also tries an inverted read (light-on-dark codes,
+      // glare, printed ID cards) at a small extra cost that the downscale
+      // more than pays for — worth it for reliability on real ID cards.
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "attemptBoth",
+      });
+      if (code && code.data) {
+        hasResultRef.current = true;
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        onResult(code.data);
+      }
     }
 
     start();
