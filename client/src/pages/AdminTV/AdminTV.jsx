@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLiveCandidates } from "../../hooks/useLiveCandidates.js";
+import { useDisplaySettings } from "../../hooks/useDisplaySettings.js";
 
 const AVATAR_TONES = ["blue", "violet", "cyan", "rose", "amber", "emerald", "indigo", "pink"];
 
@@ -129,6 +130,7 @@ function Leaderboard({ title, eyebrow, rows, accent }) {
 
 export default function AdminTV() {
   const { boys, girls } = useLiveCandidates();
+  const { showQr } = useDisplaySettings();
   const totalVotes = boys.reduce((sum, c) => sum + (c.votes || 0), 0) + girls.reduce((sum, c) => sum + (c.votes || 0), 0);
 
   return (
@@ -172,6 +174,27 @@ export default function AdminTV() {
         <span>PICT · FY-08 · CR ELECTIONS</span>
         <span>Live results update automatically</span>
       </footer>
+
+      {showQr && <QrOverlay />}
     </main>
+  );
+}
+
+function QrOverlay() {
+  return (
+    <div className="tv-qr-overlay" role="dialog" aria-label="Student voting QR code">
+      <div className="tv-qr-backdrop" />
+      <div className="tv-qr-card">
+        <div className="tv-qr-live"><i /> LIVE VOTING</div>
+        <div className="tv-qr-icon">SCAN</div>
+        <h2>Scan to vote</h2>
+        <p>Use your phone camera to open the student voting page.</p>
+        <div className="tv-qr-image-wrap">
+          <img src="/student-vote-qr.png" alt="QR code for student voting" />
+        </div>
+        <div className="tv-qr-url">cr-election-7kjkr9lat-cetwalle.vercel.app/student/vote</div>
+        <div className="tv-qr-hint">PICT · FIRST YEAR · FY-08</div>
+      </div>
+    </div>
   );
 }

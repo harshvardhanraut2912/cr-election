@@ -27,5 +27,12 @@ service cloud.firestore {
       allow read: if false;  // device identifiers, never public
       allow write: if false;
     }
+
+    match /settings/{settingId} {
+      // TV display controls are intentionally public-read so a TV can react
+      // instantly without exposing any voter data. Writes remain backend-only.
+      allow read: if true;
+      allow write: if false;
+    }
   }
 }

@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "../../firebase/config.js";
 import {
   getCandidates,
   adminAddCandidate,
   adminRemoveCandidate,
   adminClearSubmissionData,
+  adminSetQrDisplay,
 } from "../../services/api.js";
 
 export default function AdminSettings() {
@@ -12,6 +15,8 @@ export default function AdminSettings() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [clearing, setClearing] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const [qrSaving, setQrSaving] = useState(false);
 
   const [category, setCategory] = useState("boys");
   const [name, setName] = useState("");
@@ -35,6 +40,15 @@ export default function AdminSettings() {
     if (token) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, "settings", "display"),
+      (snap) => setShowQr(Boolean(snap.exists() && snap.data()?.showQr)),
+      () => {}
+    );
+    return unsubscribe;
+  }, []);
 
   async function handleAdd(e) {
     e.preventDefault();
@@ -60,6 +74,22 @@ export default function AdminSettings() {
       refresh();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleQrToggle(nextValue) {
+    setError("");
+    setNotice("");
+    setShowQr(nextValue);
+    setQrSaving(true);
+    try {
+      await adminSetQrDisplay(nextValue);
+      setNotice(nextValue ? "QR display enabled on the TV." : "QR display hidden from the TV.");
+    } catch (err) {
+      setShowQr(!nextValue);
+      setError(err.message);
+    } finally {
+      setQrSaving(false);
     }
   }
 
@@ -120,6 +150,12 @@ export default function AdminSettings() {
         </div>
       </Section>
 
+      <QrSection
+        enabled={showQr}
+        saving={qrSaving}
+        onToggle={handleQrToggle}
+      />
+
       <DangerSection
         title="Clear Submission Data"
         onClear={handleClearSubmissionData}
@@ -140,6 +176,60 @@ function CandidateList({ title, category, items, onRemove }) {
         </div>
       ))}
       {items.length === 0 && <p style={{ color: "var(--text-muted)" }}>No electors yet.</p>}
+    </div>
+  );
+}
+
+function QrSection({ enabled, saving, onToggle }) {
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #f8fbff, #f8f5ff)",
+      border: "1px solid #dbe4f2",
+      borderRadius: 16,
+      padding: 20,
+      marginBottom: 20,
+      boxShadow: "0 8px 24px rgba(37, 99, 235, 0.06)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{
+              width: 40, height: 40, borderRadius: 12, display: "grid", placeItems: "center",
+              background: "linear-gradient(135deg,#2563eb,#7c3aed)", color: "#fff", fontWeight: 900, fontSize: 16
+            }}>QR</span>
+            <div>
+              <h3 style={{ margin: 0 }}>Show QR on TV</h3>
+              <p style={{ margin: "5px 0 0", color: "var(--text-muted)", lineHeight: 1.45, fontSize: 14 }}>
+                Display the student voting QR code as a full-screen overlay on <strong>/admin/tv</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Toggle QR display on TV"
+          disabled={saving}
+          onClick={() => onToggle(!enabled)}
+          style={{
+            width: 68, height: 38, padding: 3, borderRadius: 999, border: "none",
+            background: enabled ? "linear-gradient(135deg,#2563eb,#7c3aed)" : "#d5dae3",
+            boxShadow: enabled ? "0 8px 20px rgba(79,70,229,.25)" : "inset 0 1px 2px rgba(0,0,0,.08)",
+            cursor: saving ? "wait" : "pointer", transition: "all .2s ease",
+            opacity: saving ? .65 : 1, position: "relative"
+          }}
+        >
+          <span style={{
+            display: "block", width: 32, height: 32, borderRadius: "50%", background: "#fff",
+            transform: enabled ? "translateX(30px)" : "translateX(0)", transition: "transform .22s cubic-bezier(.2,.8,.2,1)",
+            boxShadow: "0 2px 7px rgba(15,23,42,.2)"
+          }} />
+        </button>
+      </div>
+      <div style={{ marginTop: 14, fontSize: 12, fontWeight: 800, color: enabled ? "#4338ca" : "#7b8494" }}>
+        {saving ? "Updating TV…" : enabled ? "ON · QR is visible on the TV now" : "OFF · TV leaderboard is visible"}
+      </div>
     </div>
   );
 }

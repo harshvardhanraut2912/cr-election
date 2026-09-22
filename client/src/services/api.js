@@ -55,3 +55,10 @@ export const adminRemoveCandidate = (category, candidateId) =>
 
 export const adminClearSubmissionData = () =>
   request(`/admin/submissions`, { method: "DELETE", headers: adminHeaders() });
+
+export const adminSetQrDisplay = (showQr) =>
+  request(`/admin/display/qr`, {
+    method: "PUT",
+    headers: adminHeaders(),
+    body: JSON.stringify({ showQr: Boolean(showQr) }),
+  });
