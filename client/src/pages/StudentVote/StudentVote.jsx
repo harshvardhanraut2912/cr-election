@@ -1,20 +1,22 @@
 import { useMemo, useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
 import { getDeviceToken } from "../../utils/deviceToken.js";
 import { lookupStudentByCard, validateVoter, getCandidates, castVote } from "../../services/api.js";
 import CameraScanner from "./CameraScanner.jsx";
 
-const STAGES = { SCAN: "SCAN", WELCOME: "WELCOME", VOTING: "VOTING", CONFIRM: "CONFIRM", DONE: "DONE" };
+const STAGES = {
+  SCAN: "SCAN",
+  VERIFY: "VERIFY",
+  ALREADY_VOTED: "ALREADY_VOTED",
+  VOTING: "VOTING",
+  CONFIRM: "CONFIRM",
+  DONE: "DONE",
+};
+
 const SCAN_MODES = { CAMERA: "CAMERA", MANUAL: "MANUAL" };
 
 export default function StudentVote() {
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const rollFromUrl = searchParams.get("election");
-
   const [stage, setStage] = useState(STAGES.SCAN);
-  const [name, setName] = useState("");
-  const [rollNumber, setRollNumber] = useState(rollFromUrl || "");
+  const [student, setStudent] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -27,69 +29,76 @@ export default function StudentVote() {
   const deviceId = useMemo(() => getDeviceToken(), []);
 
   async function handleCardScanned(rawValue) {
-    const misId = String(rawValue || "").trim();
-    if (!misId) return;
+    const misId = String(rawValue || "").trim().toUpperCase();
+    if (!misId || scanning) return;
+
     setError("");
     setScanning(true);
-    try {
-      const student = await lookupStudentByCard(misId);
-      setName(student.name);
-      setRollNumber(String(student.rollNumber));
-      setStage(STAGES.WELCOME);
 
-      setLoading(true);
-      await validateVoter({ name: student.name, rollNumber: student.rollNumber, deviceId });
-      const data = await getCandidates();
-      setCandidates(data);
-      navigate(`/student/vote?election=${encodeURIComponent(String(student.rollNumber))}`, { replace: true });
-      setTimeout(() => setStage(STAGES.VOTING), 900);
+    try {
+      // IMPORTANT: scanning only looks up the student. Firebase's
+      // already-voted check happens after the student presses Confirm & Continue.
+      const found = await lookupStudentByCard(misId);
+      setStudent(found);
+      setStage(STAGES.VERIFY);
     } catch (err) {
-      setError(err.message);
+      setError(err?.message || "Card could not be recognized. Please try again.");
       setStage(STAGES.SCAN);
     } finally {
       setScanning(false);
-      setLoading(false);
     }
   }
 
-  // Camera flow: the scanner first loads the identity details from
-  // server/data/students.json. Only after the operator presses
-  // “Confirm & Continue” do we query Firebase via validateVoter.
-  async function lookupScannedStudent(misId) {
-    return lookupStudentByCard(misId);
-  }
+  async function handleConfirmStudent() {
+    if (!student) return;
 
-  async function verifyScannedStudent(_misId, student) {
-    setError("");
-    await validateVoter({
-      name: student.name,
-      rollNumber: student.rollNumber,
-      deviceId,
-    });
-  }
-
-  async function handleCameraVerified(_misId, student) {
-    setError("");
-    setName(student.name);
-    setRollNumber(String(student.rollNumber));
     setLoading(true);
+    setError("");
 
     try {
+      // This is deliberately the first Firebase-backed validation after
+      // confirmation. It does NOT mark the student as voted yet.
+      await validateVoter({
+        name: student.name,
+        rollNumber: student.rollNumber,
+        deviceId,
+      });
+
       const data = await getCandidates();
-      setCandidates(data);
-      navigate(`/student/vote?election=${encodeURIComponent(String(student.rollNumber))}`, { replace: true });
+      setCandidates({
+        boys: Array.isArray(data?.boys) ? data.boys : [],
+        girls: Array.isArray(data?.girls) ? data.girls : [],
+      });
+      setBoysChoice(null);
+      setGirlsChoice(null);
       setStage(STAGES.VOTING);
     } catch (err) {
-      setError(err.message);
-      setStage(STAGES.SCAN);
+      const message = err?.message || "Unable to verify this student.";
+      setError(message);
+
+      // Keep the student on the verification result when Firebase says the
+      // student/device has already voted. This makes the result explicit.
+      if (/already voted|already been used|already been submitted/i.test(message)) {
+        setStage(STAGES.ALREADY_VOTED);
+      } else {
+        setStage(STAGES.VERIFY);
+      }
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleScanAnother() {
+    setStudent(null);
+    setError("");
+    setBoysChoice(null);
+    setGirlsChoice(null);
+    setStage(STAGES.SCAN);
   }
 
   function handleGoToConfirm() {
     if (!boysChoice || !girlsChoice) {
-      setError("Please select one Boys elector and one Girls elector.");
+      setError("Please select one Boys CR and one Girls CR candidate.");
       return;
     }
     setError("");
@@ -97,19 +106,21 @@ export default function StudentVote() {
   }
 
   async function handleSubmit() {
+    if (!student) return;
+
     setLoading(true);
     setError("");
     try {
       await castVote({
-        name,
-        rollNumber,
+        name: student.name,
+        rollNumber: student.rollNumber,
         deviceId,
         boysCandidateId: boysChoice,
         girlsCandidateId: girlsChoice,
       });
       setStage(STAGES.DONE);
     } catch (err) {
-      setError(err.message);
+      setError(err?.message || "Failed to submit your vote.");
     } finally {
       setLoading(false);
     }
@@ -126,17 +137,73 @@ export default function StudentVote() {
         scanMode={scanMode}
         setScanMode={setScanMode}
         onManualSubmit={handleCardScanned}
+        onCameraResult={handleCardScanned}
       />
     );
   }
 
-  if (stage === STAGES.WELCOME) {
+  if (stage === STAGES.VERIFY || stage === STAGES.ALREADY_VOTED) {
+    return (
+      <VerificationScreen
+        student={student}
+        alreadyVoted={stage === STAGES.ALREADY_VOTED}
+        error={error}
+        loading={loading}
+        onConfirm={handleConfirmStudent}
+        onScanAnother={handleScanAnother}
+      />
+    );
+  }
+
+  if (stage === STAGES.VOTING) {
     return (
       <Centered>
-        <div style={{ ...cardStyle, textAlign: "center", padding: "40px 24px" }}>
-          <CheckBadge />
-          <h2 style={{ margin: "16px 0 4px" }}>Welcome, {name.split(" ")[0]}</h2>
-          <p style={{ color: "var(--text-muted)", margin: 0 }}>Roll No. {rollNumber} &middot; Loading ballot…</p>
+        <div style={pageHeader}>
+          <div style={eyebrow}>CLASS REPRESENTATIVE ELECTION</div>
+          <h1 style={pageTitle}>Choose your representatives</h1>
+          <p style={pageSubtitle}>
+            {student?.name} · {student?.division} · Roll No. {student?.rollNumber}
+          </p>
+        </div>
+
+        {error && <ErrorBox message={error} />}
+
+        <div style={cardStyle}>
+          <ElectorGroup title="Boys CR" candidates={candidates.boys} selected={boysChoice} onSelect={setBoysChoice} />
+          <ElectorGroup title="Girls CR" candidates={candidates.girls} selected={girlsChoice} onSelect={setGirlsChoice} />
+          <button style={primaryButton} onClick={handleGoToConfirm}>
+            Review Vote
+          </button>
+        </div>
+      </Centered>
+    );
+  }
+
+  if (stage === STAGES.CONFIRM) {
+    return (
+      <Centered>
+        <div style={pageHeader}>
+          <div style={eyebrow}>FINAL REVIEW</div>
+          <h1 style={pageTitle}>Confirm your vote</h1>
+          <p style={pageSubtitle}>Review your selections carefully before submitting.</p>
+        </div>
+
+        {error && <ErrorBox message={error} />}
+
+        <div style={cardStyle}>
+          <div style={studentMiniCard}>
+            <strong>{student?.name}</strong>
+            <span>{student?.division} · Roll No. {student?.rollNumber}</span>
+          </div>
+          <div style={selectionRow}><span>Boys CR</span><strong>{boysName}</strong></div>
+          <div style={selectionRow}><span>Girls CR</span><strong>{girlsName}</strong></div>
+          <p style={warningText}>Your vote cannot be changed after submission.</p>
+          <button style={primaryButton} onClick={handleSubmit} disabled={loading}>
+            {loading ? "Submitting…" : "Confirm & Submit Vote"}
+          </button>
+          <button style={secondaryButton} onClick={() => setStage(STAGES.VOTING)} disabled={loading}>
+            Back to ballot
+          </button>
         </div>
       </Centered>
     );
@@ -144,49 +211,80 @@ export default function StudentVote() {
 
   return (
     <Centered>
-      <h1 style={{ marginBottom: 4, fontSize: 24 }}>Class Representative Election</h1>
-      <p style={{ color: "var(--text-muted)", marginTop: 0 }}>
-        {name} &middot; Roll No. {rollNumber}
-      </p>
-
-      {error && <ErrorBox message={error} />}
-
-      {stage === STAGES.VOTING && (
-        <div style={cardStyle}>
-          <ElectorGroup title="Boys CR" candidates={candidates.boys} selected={boysChoice} onSelect={setBoysChoice} />
-          <ElectorGroup title="Girls CR" candidates={candidates.girls} selected={girlsChoice} onSelect={setGirlsChoice} />
-          <button style={primaryButton} onClick={handleGoToConfirm}>
-            Submit Vote
-          </button>
-        </div>
-      )}
-
-      {stage === STAGES.CONFIRM && (
-        <div style={cardStyle}>
-          <h3 style={{ marginTop: 0 }}>You are voting for:</h3>
-          <p>Boys CR: <strong>{boysName}</strong></p>
-          <p>Girls CR: <strong>{girlsName}</strong></p>
-          <p style={{ color: "#b45309" }}>Your vote cannot be changed after submission.</p>
-          <button style={primaryButton} onClick={handleSubmit} disabled={loading}>
-            {loading ? "Submitting..." : "Confirm & Submit"}
-          </button>
-          <button style={secondaryButton} onClick={() => setStage(STAGES.VOTING)} disabled={loading}>
-            Back
-          </button>
-        </div>
-      )}
-
-      {stage === STAGES.DONE && (
-        <div style={{ ...cardStyle, textAlign: "center" }}>
-          <h2 style={{ color: "var(--success)" }}>Your vote is submitted</h2>
-          <p style={{ color: "var(--text-muted)" }}>Thank you for voting.</p>
-        </div>
-      )}
+      <div style={{ ...cardStyle, textAlign: "center", padding: "48px 28px" }}>
+        <CheckBadge />
+        <div style={eyebrow}>VOTE RECORDED</div>
+        <h1 style={{ margin: "10px 0 6px", fontSize: 28 }}>Thank you for voting</h1>
+        <p style={{ color: "var(--text-muted)", margin: 0 }}>Your vote has been securely submitted.</p>
+      </div>
     </Centered>
   );
 }
 
-function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit }) {
+function VerificationScreen({ student, alreadyVoted, error, loading, onConfirm, onScanAnother }) {
+  return (
+    <div style={verifyPage}>
+      <div style={verifyCard}>
+        <div style={verifyTopBar}>
+          <div style={verifyBrandMark}>CR</div>
+          <span>Student verification</span>
+        </div>
+
+        <div style={{ padding: "34px 26px 28px" }}>
+          <div style={{ ...statusIcon, ...(alreadyVoted ? statusIconDanger : {}) }}>
+            {alreadyVoted ? "!" : "✓"}
+          </div>
+
+          <div style={eyebrow}>{alreadyVoted ? "VOTING ALREADY COMPLETED" : "ID CARD SCANNED"}</div>
+          <h1 style={verifyTitle}>{alreadyVoted ? "You have already voted" : "Confirm student details"}</h1>
+          <p style={verifySubtitle}>
+            {alreadyVoted
+              ? "This student cannot submit another vote in this election."
+              : "Review the information below before continuing to the ballot."}
+          </p>
+
+          {error && <ErrorBox message={error} />}
+
+          <div style={detailsCard}>
+            <Detail label="STUDENT NAME" value={student?.name} full />
+            <div style={detailGrid}>
+              <Detail label="CLASS" value={student?.division} />
+              <Detail label="ROLL NO." value={student?.rollNumber} />
+              <Detail label="STUDENT ID" value={student?.misId} />
+            </div>
+          </div>
+
+          {!alreadyVoted ? (
+            <button style={verifyPrimary} onClick={onConfirm} disabled={loading}>
+              {loading ? "Checking election record…" : "Confirm & Continue"}
+            </button>
+          ) : (
+            <button style={verifyPrimary} onClick={onScanAnother}>
+              Scan another card
+            </button>
+          )}
+
+          {!alreadyVoted && (
+            <button style={textButton} onClick={onScanAnother} disabled={loading}>
+              Scan another card
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Detail({ label, value, full }) {
+  return (
+    <div style={{ ...detailBlock, ...(full ? detailFull : {}) }}>
+      <div style={detailLabel}>{label}</div>
+      <div style={detailValue}>{value || "—"}</div>
+    </div>
+  );
+}
+
+function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit, onCameraResult }) {
   const [manualValue, setManualValue] = useState("");
 
   return (
@@ -197,10 +295,8 @@ function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit }) 
           <span style={brandText}>Class Representative Election</span>
         </div>
 
-        <h1 style={scanTitle}>Scan your identity card to enter voting</h1>
-        <p style={scanSubtitle}>
-          Use your camera to scan the QR code on your college ID, or choose another option below.
-        </p>
+        <h1 style={scanTitle}>Scan your identity card</h1>
+        <p style={scanSubtitle}>Place the barcode or QR code inside the frame. It will be detected automatically.</p>
 
         <div style={tabRow}>
           <TabButton active={scanMode === SCAN_MODES.CAMERA} onClick={() => setScanMode(SCAN_MODES.CAMERA)}>
@@ -211,16 +307,11 @@ function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit }) 
           </TabButton>
         </div>
 
-        {scanning && <p style={scanStatus}>Verifying card…</p>}
         {error && <ErrorBox message={error} />}
+        {scanning && <p style={scanStatus}>Reading student record…</p>}
 
         {scanMode === SCAN_MODES.CAMERA && (
-          <CameraScanner
-            active={scanMode === SCAN_MODES.CAMERA}
-            lookupStudent={lookupScannedStudent}
-            verifyStudent={verifyScannedStudent}
-            onResult={handleCameraVerified}
-          />
+          <CameraScanner active={!scanning} onResult={onCameraResult} />
         )}
 
         {scanMode === SCAN_MODES.MANUAL && (
@@ -238,8 +329,8 @@ function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit }) 
               value={manualValue}
               onChange={(e) => setManualValue(e.target.value)}
             />
-            <button type="submit" style={primaryButton} disabled={scanning}>
-              {scanning ? "Checking..." : "Continue"}
+            <button type="submit" style={primaryButton} disabled={scanning || !manualValue.trim()}>
+              {scanning ? "Checking…" : "Continue"}
             </button>
           </form>
         )}
@@ -258,9 +349,9 @@ function TabButton({ active, onClick, children }) {
 
 function ElectorGroup({ title, candidates, selected, onSelect }) {
   return (
-    <div style={{ marginBottom: 20 }}>
-      <h3 style={{ marginBottom: 8 }}>{title}</h3>
-      {candidates.length === 0 && <p style={{ color: "var(--text-muted)", fontSize: 14 }}>No electors added yet.</p>}
+    <div style={{ marginBottom: 24 }}>
+      <h3 style={{ margin: "0 0 10px", fontSize: 16 }}>{title}</h3>
+      {candidates.length === 0 && <p style={{ color: "var(--text-muted)", fontSize: 14 }}>No candidates added yet.</p>}
       {candidates.map((c) => (
         <label key={c.id} style={{ ...radioRow, ...(selected === c.id ? radioRowSelected : {}) }}>
           <input type="radio" name={title} checked={selected === c.id} onChange={() => onSelect(c.id)} />
@@ -280,16 +371,12 @@ function Centered({ children }) {
 }
 
 function ErrorBox({ message }) {
-  return (
-    <div style={{ background: "var(--danger-bg)", border: "1px solid #fecaca", color: "var(--danger)", padding: 12, borderRadius: 8, marginTop: 16, marginBottom: 4, fontSize: 14, textAlign: "left" }}>
-      {message}
-    </div>
-  );
+  return <div style={errorBox}>{message}</div>;
 }
 
 function CheckBadge() {
   return (
-    <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--success)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
+    <div style={checkBadge}>
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="20 6 9 17 4 12" />
       </svg>
@@ -297,91 +384,119 @@ function CheckBadge() {
   );
 }
 
-const cardStyle = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, marginTop: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" };
-const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "#fff", color: "var(--text)", fontSize: 15, marginBottom: 4 };
-const primaryButton = { width: "100%", marginTop: 14, padding: "13px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontWeight: 600, fontSize: 15 };
-const secondaryButton = { ...primaryButton, marginTop: 10, background: "transparent", border: "1px solid var(--border)", color: "var(--text-muted)" };
-const radioRow = { display: "flex", alignItems: "center", padding: "10px 12px", cursor: "pointer", borderRadius: 8, border: "1px solid var(--border)", marginBottom: 6 };
-const radioRowSelected = { borderColor: "var(--primary)", background: "#eff6ff" };
-
-// ---- Scan screen styling (bright, professional theme) ----
-const scanScreenWrap = {
+const verifyPage = {
   minHeight: "100vh",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   padding: "24px 16px",
-  background: "linear-gradient(180deg, #f4f7fc 0%, #eef2f9 100%)",
+  background: "linear-gradient(180deg, #f5f7fb 0%, #eef1f6 100%)",
 };
 
-const scanCard = {
+const verifyCard = {
   width: "100%",
-  maxWidth: 440,
-  background: "var(--surface)",
-  border: "1px solid var(--border)",
-  borderRadius: 20,
-  padding: "36px 28px 32px",
-  textAlign: "center",
-  boxShadow: "0 8px 30px rgba(15,23,42,0.08)",
-  color: "var(--text)",
+  maxWidth: 500,
+  overflow: "hidden",
+  background: "rgba(255,255,255,0.96)",
+  border: "1px solid #dfe3e9",
+  borderRadius: 24,
+  boxShadow: "0 18px 60px rgba(15,23,42,0.10)",
 };
 
-const brandRow = { display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 22 };
-
-const brandMark = {
-  width: 34,
-  height: 34,
-  borderRadius: 10,
-  background: "var(--primary)",
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 13,
+const verifyTopBar = {
+  height: 72,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  letterSpacing: 0.3,
+  gap: 10,
+  borderBottom: "1px solid #e7e9ed",
+  fontSize: 16,
+  fontWeight: 650,
+  color: "#60656f",
 };
 
-const brandText = { fontSize: 13, fontWeight: 600, color: "var(--text-muted)", letterSpacing: 0.2 };
-
-const scanTitle = { fontSize: 21, fontWeight: 700, margin: "0 0 8px", lineHeight: 1.3, color: "var(--text)" };
-const scanSubtitle = { fontSize: 14, color: "var(--text-muted)", margin: "0 0 4px", lineHeight: 1.5 };
-const scanStatus = { fontSize: 13.5, color: "var(--primary-dark)", marginTop: 16, fontWeight: 600, letterSpacing: 0.2 };
-
-const tabRow = {
-  display: "flex",
-  gap: 6,
-  background: "#f1f5f9",
-  borderRadius: 10,
-  padding: 4,
-  marginTop: 22,
-  marginBottom: 6,
+const verifyBrandMark = {
+  width: 30,
+  height: 30,
+  borderRadius: 9,
+  display: "grid",
+  placeItems: "center",
+  background: "#17181c",
+  color: "white",
+  fontSize: 11,
+  fontWeight: 800,
 };
 
-const tabButton = {
-  flex: 1,
-  padding: "9px 6px",
-  borderRadius: 8,
-  border: "none",
-  background: "transparent",
-  color: "var(--text-muted)",
-  fontSize: 12.5,
-  fontWeight: 600,
-  transition: "all 0.15s ease",
+const statusIcon = {
+  width: 76,
+  height: 76,
+  margin: "0 auto 28px",
+  borderRadius: 24,
+  display: "grid",
+  placeItems: "center",
+  background: "#edf9f1",
+  border: "1px solid #c9ead5",
+  color: "#278650",
+  fontSize: 42,
+  fontWeight: 500,
 };
 
-const tabButtonActive = {
+const statusIconDanger = { background: "#fff1f1", borderColor: "#f4caca", color: "#c93636" };
+const eyebrow = { fontSize: 12, letterSpacing: 2.2, fontWeight: 750, color: "#737780", textAlign: "center" };
+const verifyTitle = { margin: "12px 0 8px", textAlign: "center", fontSize: 31, lineHeight: 1.08, letterSpacing: -1.2, color: "#111318" };
+const verifySubtitle = { maxWidth: 390, margin: "0 auto", textAlign: "center", color: "#777b83", fontSize: 16, lineHeight: 1.5 };
+
+const detailsCard = {
+  marginTop: 28,
+  padding: "4px 22px 8px",
+  border: "1px solid #e1e3e7",
+  borderRadius: 20,
   background: "#fff",
-  color: "var(--primary)",
-  boxShadow: "0 1px 3px rgba(15,23,42,0.12)",
 };
 
-const linkButton = {
+const detailBlock = { padding: "20px 0", minWidth: 0 };
+const detailFull = { borderBottom: "1px solid #eceef1" };
+const detailGrid = { display: "grid", gridTemplateColumns: "1fr 1fr", columnGap: 24 };
+const detailLabel = { color: "#858992", fontSize: 11.5, letterSpacing: 1.5, fontWeight: 750, marginBottom: 8 };
+const detailValue = { color: "#17191e", fontSize: 18, lineHeight: 1.25, fontWeight: 650, wordBreak: "break-word" };
+
+const verifyPrimary = {
+  width: "100%",
   marginTop: 22,
-  background: "transparent",
+  padding: "15px 18px",
   border: "none",
-  color: "var(--text-muted)",
-  fontSize: 13,
-  textDecoration: "underline",
-  padding: 0,
+  borderRadius: 14,
+  background: "#17181c",
+  color: "#fff",
+  fontSize: 16,
+  fontWeight: 700,
+  boxShadow: "0 8px 20px rgba(23,24,28,0.16)",
 };
+
+const textButton = { width: "100%", marginTop: 14, padding: "10px", border: "none", background: "transparent", color: "#747880", fontSize: 14, fontWeight: 600 };
+const studentMiniCard = { display: "flex", flexDirection: "column", gap: 5, paddingBottom: 18, marginBottom: 18, borderBottom: "1px solid var(--border)" };
+const selectionRow = { display: "flex", justifyContent: "space-between", gap: 16, padding: "14px 0", borderBottom: "1px solid var(--border)" };
+const warningText = { color: "#a15b00", fontSize: 13, lineHeight: 1.45, margin: "18px 0 0" };
+
+const scanScreenWrap = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", background: "linear-gradient(180deg, #f4f7fc 0%, #eef2f9 100%)" };
+const scanCard = { width: "100%", maxWidth: 440, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 20, padding: "36px 28px 32px", textAlign: "center", boxShadow: "0 8px 30px rgba(15,23,42,0.08)", color: "var(--text)" };
+const brandRow = { display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 22 };
+const brandMark = { width: 34, height: 34, borderRadius: 10, background: "var(--primary)", color: "#fff", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" };
+const brandText = { fontSize: 13, fontWeight: 600, color: "var(--text-muted)" };
+const scanTitle = { fontSize: 24, fontWeight: 750, margin: "0 0 8px", lineHeight: 1.25 };
+const scanSubtitle = { fontSize: 14, color: "var(--text-muted)", margin: "0 0 4px", lineHeight: 1.5 };
+const scanStatus = { fontSize: 13.5, color: "var(--primary-dark)", marginTop: 16, fontWeight: 650 };
+const tabRow = { display: "flex", gap: 6, background: "#f1f5f9", borderRadius: 10, padding: 4, marginTop: 22, marginBottom: 6 };
+const tabButton = { flex: 1, padding: "9px 6px", borderRadius: 8, border: "none", background: "transparent", color: "var(--text-muted)", fontSize: 12.5, fontWeight: 600 };
+const tabButtonActive = { background: "#fff", color: "var(--primary)", boxShadow: "0 1px 3px rgba(15,23,42,0.12)" };
+const inputStyle = { width: "100%", padding: "12px", borderRadius: 10, border: "1px solid var(--border)", background: "#fff", color: "var(--text)", fontSize: 15 };
+const primaryButton = { width: "100%", marginTop: 14, padding: "13px", borderRadius: 10, border: "none", background: "var(--primary)", color: "#fff", fontWeight: 650, fontSize: 15 };
+const secondaryButton = { ...primaryButton, marginTop: 10, background: "transparent", border: "1px solid var(--border)", color: "var(--text-muted)" };
+const radioRow = { display: "flex", alignItems: "center", padding: "12px", cursor: "pointer", borderRadius: 10, border: "1px solid var(--border)", marginBottom: 7 };
+const radioRowSelected = { borderColor: "var(--primary)", background: "#eff6ff" };
+const pageHeader = { textAlign: "center", marginBottom: 8 };
+const pageTitle = { margin: "8px 0 5px", fontSize: 27, letterSpacing: -0.6 };
+const pageSubtitle = { margin: 0, color: "var(--text-muted)", fontSize: 14 };
+const errorBox = { background: "var(--danger-bg)", border: "1px solid #fecaca", color: "var(--danger)", padding: 12, borderRadius: 10, marginTop: 16, marginBottom: 4, fontSize: 14, textAlign: "left" };
+const checkBadge = { width: 60, height: 60, borderRadius: "50%", background: "var(--success)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" };
+const cardStyle = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 24, marginTop: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" };
