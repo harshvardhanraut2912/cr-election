@@ -1,49 +1,177 @@
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLiveCandidates } from "../../hooks/useLiveCandidates.js";
 
-export default function AdminTV() {
-  const { boys, girls } = useLiveCandidates();
+const AVATAR_TONES = ["blue", "violet", "cyan", "rose", "amber", "emerald", "indigo", "pink"];
+
+function initials(name = "") {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "CR";
+  return parts.slice(0, 2).map((p) => p[0]).join("").toUpperCase();
+}
+
+function AnimatedNumber({ value }) {
+  const [display, setDisplay] = useState(value || 0);
+  const previous = useRef(value || 0);
+
+  useLayoutEffect(() => {
+    const from = previous.current;
+    const to = value || 0;
+    previous.current = to;
+    if (from === to) return;
+
+    const duration = 520;
+    const start = performance.now();
+    let frame;
+    const tick = (now) => {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(from + (to - from) * eased));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+
+  return <>{display}</>;
+}
+
+function Leaderboard({ title, eyebrow, rows, accent }) {
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => (b.votes || 0) - (a.votes || 0) || (a.order ?? 0) - (b.order ?? 0)),
+    [rows]
+  );
+  const refs = useRef(new Map());
+  const previousRects = useRef(new Map());
+  const previousVotes = useRef(new Map());
+
+  useLayoutEffect(() => {
+    const nextRects = new Map();
+    sorted.forEach((candidate) => {
+      const node = refs.current.get(candidate.id);
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      nextRects.set(candidate.id, rect);
+      const old = previousRects.current.get(candidate.id);
+      if (old && Math.abs(old.top - rect.top) > 1) {
+        const delta = old.top - rect.top;
+        node.style.transition = "none";
+        node.style.transform = `translateY(${delta}px)`;
+        node.style.zIndex = "3";
+        requestAnimationFrame(() => {
+          node.style.transition = "transform 720ms cubic-bezier(.2,.82,.2,1), box-shadow 420ms ease, border-color 420ms ease";
+          node.style.transform = "translateY(0)";
+        });
+        window.setTimeout(() => {
+          if (refs.current.get(candidate.id) === node) node.style.zIndex = "";
+        }, 760);
+      }
+    });
+    previousRects.current = nextRects;
+  }, [sorted]);
+
+  const maxVotes = Math.max(1, ...sorted.map((candidate) => candidate.votes || 0));
+  const totalVotes = sorted.reduce((sum, candidate) => sum + (candidate.votes || 0), 0);
 
   return (
-    <div style={{ minHeight: "100vh", padding: 32 }}>
-      <div style={{ textAlign: "center", marginBottom: 32 }}>
-        <h1 style={{ fontSize: 36, margin: 0 }}>Class Representative Election</h1>
-        <div style={{ fontSize: 16, color: "var(--text-muted)", marginTop: 6 }}>Live results</div>
+    <section className={`tv-board tv-board-${accent}`}>
+      <div className="tv-board-header">
+        <div>
+          <span className="tv-board-eyebrow">{eyebrow}</span>
+          <h2>{title}</h2>
+        </div>
+        <div className="tv-board-total">
+          <strong><AnimatedNumber value={totalVotes} /></strong>
+          <span>votes</span>
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 24, justifyContent: "center", flexWrap: "wrap" }}>
-        <LeaderboardTable title="Boys CR" rows={boys} />
-        <LeaderboardTable title="Girls CR" rows={girls} />
+      <div className="tv-list">
+        {sorted.map((candidate, index) => {
+          const votes = candidate.votes || 0;
+          const previousVote = previousVotes.current.get(candidate.id) ?? votes;
+          const changed = votes !== previousVote;
+          previousVotes.current.set(candidate.id, votes);
+          const isLeader = index === 0 && votes > 0;
+          const tone = AVATAR_TONES[(candidate.order ?? index) % AVATAR_TONES.length];
+
+          return (
+            <div
+              className={`tv-row ${isLeader ? "is-leader" : ""} ${changed ? "vote-changed" : ""}`}
+              key={candidate.id}
+              ref={(node) => {
+                if (node) refs.current.set(candidate.id, node);
+                else refs.current.delete(candidate.id);
+              }}
+            >
+              <div className="tv-rank">{index + 1}</div>
+              <div className={`tv-avatar tv-avatar-${tone}`}>{initials(candidate.name)}</div>
+              <div className="tv-candidate-main">
+                <div className="tv-candidate-name-line">
+                  <strong>{candidate.name}</strong>
+                  {isLeader && <span className="leader-chip">LEADING</span>}
+                </div>
+                <div className="tv-progress-track">
+                  <span style={{ width: `${votes ? Math.max(4, (votes / maxVotes) * 100) : 0}%` }} />
+                </div>
+              </div>
+              <div className="tv-vote-count">
+                <strong><AnimatedNumber value={votes} /></strong>
+                <span>{votes === 1 ? "vote" : "votes"}</span>
+              </div>
+            </div>
+          );
+        })}
+        {!sorted.length && <div className="tv-empty">No candidates added yet.</div>}
       </div>
-    </div>
+    </section>
   );
 }
 
-function LeaderboardTable({ title, rows }) {
-  const sorted = [...rows].sort((a, b) => (b.votes || 0) - (a.votes || 0));
-  const maxVotes = Math.max(1, ...sorted.map((r) => r.votes || 0));
+export default function AdminTV() {
+  const { boys, girls } = useLiveCandidates();
+  const totalVotes = boys.reduce((sum, c) => sum + (c.votes || 0), 0) + girls.reduce((sum, c) => sum + (c.votes || 0), 0);
 
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 24, minWidth: 380, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
-      <h2 style={{ marginTop: 0, marginBottom: 16 }}>{title}</h2>
-      {sorted.length === 0 && <p style={{ color: "var(--text-muted)" }}>No electors added yet.</p>}
-      {sorted.map((c) => (
-        <div key={c.id} style={{ marginBottom: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 16 }}>
-            <span>{c.name}</span>
-            <strong>{c.votes || 0}</strong>
+    <main className="tv-page">
+      <div className="tv-orb tv-orb-one" />
+      <div className="tv-orb tv-orb-two" />
+      <div className="tv-grid-glow" />
+
+      <header className="tv-header">
+        <div className="tv-header-topline">
+          <div className="tv-brand">
+            <div className="tv-brand-mark">CR</div>
+            <div>
+              <strong>PICT College</strong>
+              <span>Class Representative Elections</span>
+            </div>
           </div>
-          <div style={{ background: "#eef1f5", borderRadius: 6, height: 10, overflow: "hidden" }}>
-            <div
-              style={{
-                width: `${((c.votes || 0) / maxVotes) * 100}%`,
-                background: "var(--primary)",
-                height: "100%",
-                transition: "width 0.4s ease",
-              }}
-            />
-          </div>
+          <div className="tv-live-pill"><i /> LIVE · REAL-TIME</div>
         </div>
-      ))}
-    </div>
+
+        <div className="tv-title-wrap">
+          <span className="tv-kicker">FIRST YEAR · FY-08</span>
+          <h1>CR Election <span>Live Leaderboard</span></h1>
+          <p>Every vote is reflected instantly. Watch the rankings move in real time.</p>
+        </div>
+
+        <div className="tv-stat-strip">
+          <div><span>BOYS' CR</span><strong>{boys.length}</strong><small>candidates</small></div>
+          <div><span>GIRLS' CR</span><strong>{girls.length}</strong><small>candidates</small></div>
+          <div><span>TOTAL VOTES</span><strong><AnimatedNumber value={totalVotes} /></strong><small>submitted</small></div>
+          <div className="tv-status"><i /> Firebase live sync</div>
+        </div>
+      </header>
+
+      <div className="tv-boards">
+        <Leaderboard title="Boys' CR" eyebrow="BOYS · REPRESENTATIVE" rows={boys} accent="blue" />
+        <Leaderboard title="Girls' CR" eyebrow="GIRLS · REPRESENTATIVE" rows={girls} accent="violet" />
+      </div>
+
+      <footer className="tv-footer">
+        <span>PICT · FY-08 · CR ELECTIONS</span>
+        <span>Live results update automatically</span>
+      </footer>
+    </main>
   );
 }
