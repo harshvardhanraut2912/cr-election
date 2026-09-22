@@ -52,3 +52,6 @@ export const adminEditCandidate = (category, candidateId, name) =>
 
 export const adminRemoveCandidate = (category, candidateId) =>
   request(`/admin/candidates/${category}/${candidateId}`, { method: "DELETE", headers: adminHeaders() });
+
+export const adminClearSubmissionData = () =>
+  request(`/admin/submissions`, { method: "DELETE", headers: adminHeaders() });

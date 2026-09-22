@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import { getCandidates, adminAddCandidate, adminRemoveCandidate } from "../../services/api.js";
+import {
+  getCandidates,
+  adminAddCandidate,
+  adminRemoveCandidate,
+  adminClearSubmissionData,
+} from "../../services/api.js";
 
 export default function AdminSettings() {
   const [token, setToken] = useState(localStorage.getItem("cr_election_admin_token") || "");
   const [candidates, setCandidates] = useState({ boys: [], girls: [] });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [clearing, setClearing] = useState(false);
 
   const [category, setCategory] = useState("boys");
   const [name, setName] = useState("");
@@ -34,6 +40,7 @@ export default function AdminSettings() {
     e.preventDefault();
     if (!name.trim()) return;
     setError("");
+    setNotice("");
     try {
       await adminAddCandidate(category, name.trim());
       setName("");
@@ -46,12 +53,36 @@ export default function AdminSettings() {
 
   async function handleRemove(cat, id) {
     setError("");
+    setNotice("");
     try {
       await adminRemoveCandidate(cat, id);
       setNotice("Elector removed.");
       refresh();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleClearSubmissionData() {
+    const confirmed = window.confirm(
+      "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record and reset every elector's vote count to 0.\n\nThe elector names and student roster will NOT be deleted."
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setNotice("");
+    setClearing(true);
+
+    try {
+      const result = await adminClearSubmissionData();
+      setNotice(
+        `Election data cleared successfully. ${result.votersDeleted || 0} student submissions removed and ${result.electorsReset || 0} elector counts reset.`
+      );
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -88,6 +119,12 @@ export default function AdminSettings() {
           <CandidateList title="Girls CR" category="girls" items={candidates.girls} onRemove={handleRemove} />
         </div>
       </Section>
+
+      <DangerSection
+        title="Clear Submission Data"
+        onClear={handleClearSubmissionData}
+        clearing={clearing}
+      />
     </div>
   );
 }
@@ -103,6 +140,43 @@ function CandidateList({ title, category, items, onRemove }) {
         </div>
       ))}
       {items.length === 0 && <p style={{ color: "var(--text-muted)" }}>No electors yet.</p>}
+    </div>
+  );
+}
+
+function DangerSection({ title, onClear, clearing }) {
+  return (
+    <div style={{
+      background: "#fff",
+      border: "1px solid #fecaca",
+      borderRadius: 12,
+      padding: 20,
+      marginBottom: 20,
+      boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 8, color: "#991b1b" }}>{title}</h3>
+          <p style={{ margin: 0, color: "var(--text-muted)", lineHeight: 1.5, fontSize: 14 }}>
+            Permanently remove all submitted student vote records and reset every elector's vote count to <strong>0</strong>. Elector names and the student roster stay untouched.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={clearing}
+          style={{
+            ...dangerButton,
+            padding: "11px 16px",
+            fontWeight: 700,
+            opacity: clearing ? 0.6 : 1,
+            cursor: clearing ? "not-allowed" : "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {clearing ? "Clearing…" : "Clear All Submissions"}
+        </button>
+      </div>
     </div>
   );
 }

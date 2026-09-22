@@ -161,3 +161,62 @@ export async function castVote(req, res) {
     res.status(500).json({ error: "Failed to submit vote" });
   }
 }
+
+// Admin: completely reset the submitted-vote state without deleting the elector roster.
+// This removes all voter/device submission records and resets every elector's vote count to 0.
+export async function clearSubmissionData(req, res) {
+  try {
+    async function deleteCollection(collectionName) {
+      let deleted = 0;
+      while (true) {
+        const snap = await db.collection(collectionName).limit(450).get();
+        if (snap.empty) break;
+
+        const batch = db.batch();
+        snap.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+        deleted += snap.size;
+
+        if (snap.size < 450) break;
+      }
+      return deleted;
+    }
+
+    const [votersDeleted, devicesDeleted, boysSnap, girlsSnap] = await Promise.all([
+      deleteCollection("voters"),
+      deleteCollection("devices"),
+      db.collection("candidates_boys").get(),
+      db.collection("candidates_girls").get(),
+    ]);
+
+    const resetVotes = async (snap) => {
+      let updated = 0;
+      for (let i = 0; i < snap.docs.length; i += 450) {
+        const batch = db.batch();
+        snap.docs.slice(i, i + 450).forEach((doc) => {
+          batch.update(doc.ref, { votes: 0 });
+        });
+        await batch.commit();
+        updated += Math.min(450, snap.docs.length - i);
+      }
+      return updated;
+    };
+
+    const [boysReset, girlsReset] = await Promise.all([
+      resetVotes(boysSnap),
+      resetVotes(girlsSnap),
+    ]);
+
+    res.json({
+      ok: true,
+      message: "All vote submission data has been cleared",
+      votersDeleted,
+      devicesDeleted,
+      electorsReset: boysReset + girlsReset,
+    });
+  } catch (err) {
+    console.error("Failed to clear submission data:", err);
+    res.status(500).json({ error: "Failed to clear submission data" });
+  }
+}
+
