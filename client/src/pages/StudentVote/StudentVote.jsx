@@ -27,7 +27,7 @@ export default function StudentVote() {
   const deviceId = useMemo(() => getDeviceToken(), []);
 
   async function handleCardScanned(rawValue) {
-    const misId = rawValue.trim();
+    const misId = String(rawValue || "").trim();
     if (!misId) return;
     setError("");
     setScanning(true);
@@ -37,8 +37,6 @@ export default function StudentVote() {
       setRollNumber(String(student.rollNumber));
       setStage(STAGES.WELCOME);
 
-      // Immediately re-validate server-side (already-voted checks) before
-      // showing the ballot.
       setLoading(true);
       await validateVoter({ name: student.name, rollNumber: student.rollNumber, deviceId });
       const data = await getCandidates();
@@ -50,6 +48,41 @@ export default function StudentVote() {
       setStage(STAGES.SCAN);
     } finally {
       setScanning(false);
+      setLoading(false);
+    }
+  }
+
+  // Camera flow: the scanner first loads the identity details from
+  // server/data/students.json. Only after the operator presses
+  // “Confirm & Continue” do we query Firebase via validateVoter.
+  async function lookupScannedStudent(misId) {
+    return lookupStudentByCard(misId);
+  }
+
+  async function verifyScannedStudent(_misId, student) {
+    setError("");
+    await validateVoter({
+      name: student.name,
+      rollNumber: student.rollNumber,
+      deviceId,
+    });
+  }
+
+  async function handleCameraVerified(_misId, student) {
+    setError("");
+    setName(student.name);
+    setRollNumber(String(student.rollNumber));
+    setLoading(true);
+
+    try {
+      const data = await getCandidates();
+      setCandidates(data);
+      navigate(`/student/vote?election=${encodeURIComponent(String(student.rollNumber))}`, { replace: true });
+      setStage(STAGES.VOTING);
+    } catch (err) {
+      setError(err.message);
+      setStage(STAGES.SCAN);
+    } finally {
       setLoading(false);
     }
   }
@@ -93,7 +126,6 @@ export default function StudentVote() {
         scanMode={scanMode}
         setScanMode={setScanMode}
         onManualSubmit={handleCardScanned}
-        onCameraResult={handleCardScanned}
       />
     );
   }
@@ -154,7 +186,7 @@ export default function StudentVote() {
   );
 }
 
-function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit, onCameraResult }) {
+function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit }) {
   const [manualValue, setManualValue] = useState("");
 
   return (
@@ -183,7 +215,12 @@ function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit, on
         {error && <ErrorBox message={error} />}
 
         {scanMode === SCAN_MODES.CAMERA && (
-          <CameraScanner active={scanMode === SCAN_MODES.CAMERA && !scanning} onResult={onCameraResult} />
+          <CameraScanner
+            active={scanMode === SCAN_MODES.CAMERA}
+            lookupStudent={lookupScannedStudent}
+            verifyStudent={verifyScannedStudent}
+            onResult={handleCameraVerified}
+          />
         )}
 
         {scanMode === SCAN_MODES.MANUAL && (

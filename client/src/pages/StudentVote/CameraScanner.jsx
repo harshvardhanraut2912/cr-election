@@ -21,7 +21,7 @@ const DETECTED_FLASH_MS = 120;
  *      app and looks in the collections configured below.
  *  - onReset() -> optional callback when the operator chooses scan another card.
  */
-export default function CameraScanner({ onResult, active, verifyStudent, onReset }) {
+export default function CameraScanner({ onResult, active, lookupStudent, verifyStudent, onReset }) {
   const videoRef = useRef(null);
   const qrCanvasRef = useRef(document.createElement("canvas"));
   const barcodeCanvasRef = useRef(document.createElement("canvas"));
@@ -33,6 +33,7 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
   const busyRef = useRef(false);
   const onResultRef = useRef(onResult);
   const verifyStudentRef = useRef(verifyStudent);
+  const lookupStudentRef = useRef(lookupStudent);
   const mountedRef = useRef(true);
 
   const [status, setStatus] = useState("starting");
@@ -43,6 +44,7 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
   const [scannedValue, setScannedValue] = useState("");
   const [verifyState, setVerifyState] = useState("idle");
   const [verifyMessage, setVerifyMessage] = useState("");
+  const [lookupState, setLookupState] = useState("idle");
 
   useEffect(() => {
     const id = "student-vote-scanner-keyframes";
@@ -56,6 +58,7 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
 
   useEffect(() => { onResultRef.current = onResult; }, [onResult]);
   useEffect(() => { verifyStudentRef.current = verifyStudent; }, [verifyStudent]);
+  useEffect(() => { lookupStudentRef.current = lookupStudent; }, [lookupStudent]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -70,6 +73,7 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
     setScannedValue("");
     setVerifyState("idle");
     setVerifyMessage("");
+    setLookupState("idle");
     setTorchOn(false);
 
     let cancelled = false;
@@ -85,6 +89,28 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
       return new Promise((resolve, reject) => legacy.call(navigator, constraints, resolve, reject));
     };
 
+    async function loadStudentDetails(cleanValue) {
+      if (!lookupStudentRef.current) {
+        setLookupState("error");
+        setVerifyMessage("Student lookup is not configured.");
+        return;
+      }
+
+      setLookupState("loading");
+      try {
+        const result = await lookupStudentRef.current(cleanValue);
+        if (!result) throw new Error("Student record could not be found.");
+        if (!mountedRef.current || cancelled) return;
+        setStudent(result);
+        setLookupState("ready");
+      } catch (error) {
+        if (!mountedRef.current || cancelled) return;
+        setStudent(null);
+        setLookupState("error");
+        setVerifyMessage(error?.message || "Student record could not be found. Please scan the ID card again.");
+      }
+    }
+
     function handleDetected(value) {
       const cleanValue = String(value || "").trim();
       if (!cleanValue || hasResultRef.current || cancelled) return;
@@ -93,11 +119,10 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       setScannedValue(cleanValue);
       setStatus("detected");
-
+      setStage("student");
+      setLookupState("loading");
       handoffTimer = setTimeout(() => {
-        if (!cancelled && mountedRef.current) {
-          setStage("student");
-        }
+        if (!cancelled && mountedRef.current) loadStudentDetails(cleanValue);
       }, DETECTED_FLASH_MS);
     }
 
@@ -233,104 +258,27 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
     };
   }, [active]);
 
-  async function lookupStudent(value) {
-    if (verifyStudentRef.current) return verifyStudentRef.current(value);
-
-    // Uses the Firebase app already initialized by the host project. No Firebase
-    // config is duplicated here. The host can also pass verifyStudent for a custom
-    // schema without changing this scanner.
-    try {
-      const [{ getApps }, firestore] = await Promise.all([
-        import("firebase/app"),
-        import("firebase/firestore"),
-      ]);
-      const app = getApps()[0];
-      if (!app) throw new Error("Firebase has not been initialized");
-
-      const db = firestore.getFirestore(app);
-      const studentCollections = String(import.meta.env.VITE_STUDENT_COLLECTIONS || "students,student").split(",").map((x) => x.trim()).filter(Boolean);
-      const idFields = ["barcode", "studentId", "studentID", "id", "prn", "rollNo", "rollNumber"];
-
-      let studentRecord = null;
-      for (const collectionName of studentCollections) {
-        for (const field of idFields) {
-          try {
-            const snap = await firestore.getDocs(firestore.query(
-              firestore.collection(db, collectionName),
-              firestore.where(field, "==", value),
-              firestore.limit(1),
-            ));
-            if (!snap.empty) {
-              studentRecord = { id: snap.docs[0].id, ...snap.docs[0].data() };
-              break;
-            }
-          } catch {
-            // A missing field/index/collection is not fatal; try the next schema.
-          }
-        }
-        if (studentRecord) break;
-      }
-
-      if (!studentRecord) return { found: false };
-
-      const voteCollections = String(import.meta.env.VITE_VOTE_COLLECTIONS || "votes,voting").split(",").map((x) => x.trim()).filter(Boolean);
-      const voteFields = ["studentId", "studentID", "barcode", "rollNo", "prn"];
-      let hasVoted = false;
-
-      for (const collectionName of voteCollections) {
-        for (const field of voteFields) {
-          const candidates = [value, studentRecord.id, studentRecord.studentId, studentRecord.rollNo, studentRecord.prn].filter(Boolean);
-          for (const candidate of candidates) {
-            try {
-              const snap = await firestore.getDocs(firestore.query(
-                firestore.collection(db, collectionName),
-                firestore.where(field, "==", candidate),
-                firestore.limit(1),
-              ));
-              if (!snap.empty) {
-                hasVoted = true;
-                break;
-              }
-            } catch {}
-          }
-          if (hasVoted) break;
-        }
-        if (hasVoted) break;
-      }
-
-      return { found: true, student: studentRecord, hasVoted };
-    } catch (error) {
-      throw new Error(error?.message || "Student verification is unavailable");
-    }
-  }
 
   async function confirmStudent() {
-    if (!scannedValue || verifyState === "checking") return;
+    if (!scannedValue || !student || lookupState !== "ready" || verifyState === "checking") return;
+    if (!verifyStudentRef.current) {
+      setVerifyState("error");
+      setVerifyMessage("Vote verification is not configured.");
+      return;
+    }
+
     setVerifyState("checking");
     setVerifyMessage("");
 
     try {
-      const result = await lookupStudent(scannedValue);
-      if (!result?.found || !result.student) {
-        setVerifyState("error");
-        setVerifyMessage("Student record could not be found. Please scan the ID card again.");
-        return;
-      }
-
-      setStudent(result.student);
-      if (result.hasVoted) {
-        setVerifyState("voted");
-        setVerifyMessage("This student has already voted.");
-        return;
-      }
-
+      await verifyStudentRef.current(scannedValue, student);
       setVerifyState("verified");
       setVerifyMessage("");
-      // Keep the original scanner contract: the parent opens the voting screen.
-      onResultRef.current?.(scannedValue, result.student);
+      onResultRef.current?.(scannedValue, student);
     } catch (error) {
-      setVerifyState("error");
-      setVerifyMessage(error?.message || "Unable to verify the student right now.");
+      const message = error?.message || "Unable to verify the student's vote status right now.";
+      setVerifyState(message.toLowerCase().includes("already") ? "voted" : "error");
+      setVerifyMessage(message);
     }
   }
 
@@ -340,6 +288,7 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
     setScannedValue("");
     setVerifyState("idle");
     setVerifyMessage("");
+    setLookupState("idle");
     hasResultRef.current = false;
     setStatus("starting");
     onReset?.();
@@ -376,21 +325,31 @@ export default function CameraScanner({ onResult, active, verifyStudent, onReset
             <p style={subheading}>Review the information before continuing to the ballot.</p>
 
             <div style={detailsCard}>
-              <Detail label="Student name" value={getStudentName(student) || "—"} prominent />
-              <div style={divider}/>
-              <div style={detailGrid}>
-                <Detail label="Class" value={getField(student, ["class", "year", "division"]) || "—"} />
-                <Detail label="Roll no." value={getField(student, ["rollNo", "rollNumber", "roll"]) || "—"} />
-                <Detail label="Student ID" value={scannedValue} />
-                <Detail label="PRN" value={getField(student, ["prn", "PRN"]) || "—"} />
-              </div>
+              {lookupState === "loading" ? (
+                <div style={lookupLoading}>
+                  <Spinner dark />
+                  <div>Finding student in the college roster…</div>
+                </div>
+              ) : (
+                <>
+                  <Detail label="Student name" value={getStudentName(student) || "—"} prominent />
+                  <div style={divider}/>
+                  <div style={detailGrid}>
+                    <Detail label="Class" value={getField(student, ["class", "year", "division"]) || "—"} />
+                    <Detail label="Roll no." value={getField(student, ["rollNo", "rollNumber", "roll"]) || "—"} />
+                    <Detail label="Student ID" value={getField(student, ["misId", "mis_id"]) || scannedValue} />
+                    <Detail label="PRN" value={getField(student, ["prn", "PRN"]) || "—"} />
+                  </div>
+                </>
+              )}
             </div>
 
+            {lookupState === "error" && <Message type="error">{verifyMessage}</Message>}
             {verifyState === "voted" && <Message type="warning">{verifyMessage}</Message>}
-            {verifyState === "error" && <Message type="error">{verifyMessage}</Message>}
+            {verifyState === "error" && lookupState !== "error" && <Message type="error">{verifyMessage}</Message>}
             {verifyState === "verified" && <Message type="success">Student verified. Opening ballot…</Message>}
 
-            <button type="button" disabled={verifyState === "checking" || verifyState === "verified" || verifyState === "voted"} style={confirmButton} onClick={confirmStudent}>
+            <button type="button" disabled={lookupState !== "ready" || verifyState === "checking" || verifyState === "verified" || verifyState === "voted"} style={confirmButton} onClick={confirmStudent}>
               {verifyState === "checking" ? <><Spinner/> Checking vote status…</> : "Confirm & Continue"}
             </button>
             <button type="button" style={secondaryButton} onClick={resetScanner}>Scan another card</button>
@@ -475,7 +434,7 @@ function Message({ type, children }) {
   return <div style={{ ...message, ...styles }}>{children}</div>;
 }
 
-function Spinner() { return <span style={spinner}/>; }
+function Spinner({ dark = false }) { return <span style={{ ...spinner, ...(dark ? spinnerDark : {}) }}/>; }
 function Overlay({ children }) { return <div style={overlay}>{children}</div>; }
 
 const page = { width: "100%", display: "flex", justifyContent: "center", padding: "18px 12px", boxSizing: "border-box" };
@@ -500,6 +459,8 @@ const confirmButton = { width: "100%", marginTop: 18, height: 48, border: 0, bor
 const secondaryButton = { marginTop: 9, border: 0, background: "transparent", color: "#686c74", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "8px 12px" };
 const message = { marginTop: 15, border: "1px solid", borderRadius: 11, padding: "11px 13px", textAlign: "left", fontSize: 13, lineHeight: 1.45, fontWeight: 550 };
 const spinner = { width: 14, height: 14, border: "2px solid rgba(255,255,255,.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" };
+const spinnerDark = { borderColor: "#d9dce1", borderTopColor: "#17191e" };
+const lookupLoading = { minHeight: 150, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "#777b83", fontSize: 13.5, fontWeight: 550 };
 const livePill = { flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6, padding: "6px 9px", borderRadius: 999, background: "#f4f5f6", border: "1px solid #e6e7e9", fontSize: 11, fontWeight: 650, color: "#666a72" };
 const viewportFrame = { position: "relative", width: "100%", maxWidth: 520, margin: "0 auto", aspectRatio: "1.78 / 1", borderRadius: 15, overflow: "hidden", background: "#080b10", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.08)" };
 const videoStyle = { width: "100%", height: "100%", objectFit: "cover" };
