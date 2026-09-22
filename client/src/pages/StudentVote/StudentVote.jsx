@@ -12,15 +12,12 @@ const STAGES = {
   DONE: "DONE",
 };
 
-const SCAN_MODES = { CAMERA: "CAMERA", MANUAL: "MANUAL" };
-
 export default function StudentVote() {
   const [stage, setStage] = useState(STAGES.SCAN);
   const [student, setStudent] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanMode, setScanMode] = useState(SCAN_MODES.CAMERA);
   const [submitPulse, setSubmitPulse] = useState(false);
 
   const [candidates, setCandidates] = useState({ boys: [], girls: [] });
@@ -121,9 +118,6 @@ export default function StudentVote() {
       <ScanScreen
         error={error}
         scanning={scanning}
-        scanMode={scanMode}
-        setScanMode={setScanMode}
-        onManualSubmit={handleCardScanned}
         onCameraResult={handleCardScanned}
       />
     );
@@ -284,28 +278,20 @@ function Detail({ label, value, full }) {
   return <div style={{ ...detailBlock, ...(full ? detailFull : {}) }}><div style={detailLabel}>{label}</div><div style={detailValue}>{value || "—"}</div></div>;
 }
 
-function ScanScreen({ error, scanning, scanMode, setScanMode, onManualSubmit, onCameraResult }) {
-  const [manualValue, setManualValue] = useState("");
+function ScanScreen({ error, scanning, onCameraResult }) {
   return (
     <div style={scanScreenWrap}>
       <div style={scanCard}>
         <div style={brandRow}><div style={brandMark}>CR</div><span style={brandText}>Class Representative Election</span></div>
         <h1 style={scanTitle}>Scan your identity card</h1>
         <p style={scanSubtitle}>Place the barcode or QR code inside the frame. It will be detected automatically.</p>
-        <div style={tabRow}>
-          <TabButton active={scanMode === SCAN_MODES.CAMERA} onClick={() => setScanMode(SCAN_MODES.CAMERA)}>Camera ID scanner</TabButton>
-          <TabButton active={scanMode === SCAN_MODES.MANUAL} onClick={() => setScanMode(SCAN_MODES.MANUAL)}>Enter manually</TabButton>
-        </div>
         {error && <ErrorBox message={error} />}
         {scanning && <p style={scanStatus}>Reading student record…</p>}
-        {scanMode === SCAN_MODES.CAMERA && <CameraScanner active={!scanning} onResult={onCameraResult} />}
-        {scanMode === SCAN_MODES.MANUAL && <form style={{ marginTop: 20 }} onSubmit={(e) => { e.preventDefault(); onManualSubmit(manualValue); }}><input autoFocus style={inputStyle} placeholder="e.g. F260243" value={manualValue} onChange={(e) => setManualValue(e.target.value)} /><button type="submit" style={primaryButton} disabled={scanning || !manualValue.trim()}>{scanning ? "Checking…" : "Continue"}</button></form>}
+        <CameraScanner active={!scanning} onResult={onCameraResult} />
       </div>
     </div>
   );
 }
-
-function TabButton({ active, onClick, children }) { return <button type="button" onClick={onClick} style={{ ...tabButton, ...(active ? tabButtonActive : {}) }}>{children}</button>; }
 
 function ElectorGroup({ title, subtitle, candidates, selected, onSelect, tone }) {
   return (
