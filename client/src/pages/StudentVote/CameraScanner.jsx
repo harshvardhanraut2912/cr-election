@@ -2,20 +2,36 @@ import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 
 /**
- * Live camera QR scanner. Opens the device camera (rear camera preferred),
- * continuously scans incoming frames for a QR code using jsQR, and calls
- * onResult(text) exactly once as soon as a code is decoded.
+ * Live camera QR scanner. Opens the device camera (rear camera preferred)
+ * and scans incoming frames for a QR code, calling onResult(text) once a
+ * code is decoded.
+ *
+ * Two decode paths:
+ *  - Native `BarcodeDetector` (Chrome/Edge on Android, and desktop Chrome
+ *    behind a flag): this is the SAME underlying engine Android's system
+ *    QR scanner and Google Lens use — hardware/GPU-backed, not JS decoding
+ *    a bitmap. It reads the <video> element directly every frame with
+ *    effectively zero lag. We use this whenever it's available.
+ *  - jsQR fallback for browsers that don't expose BarcodeDetector yet
+ *    (Safari/iOS, Firefox). Still downscaled + throttled for speed.
  */
-// Decoding is done on a downscaled copy of the video frame, not the raw
-// camera resolution. jsQR's cost scales with pixel count, so scanning a
-// full 1920x1080 frame (~2M px) instead of a ~480px-wide copy (~80K px)
-// is over 20x slower for no accuracy benefit — that's what made the old
-// version feel stuck/slow on phones.
+const HAS_NATIVE_DETECTOR = typeof window !== "undefined" && "BarcodeDetector" in window;
+
+// jsQR fallback tuning — decoding is done on a downscaled copy of the video
+// frame, not the raw camera resolution. jsQR's cost scales with pixel
+// count, so scanning a full 1920x1080 frame (~2M px) instead of a
+// ~480px-wide copy (~80K px) is over 20x slower for no accuracy benefit.
 const DECODE_WIDTH = 480;
-// Cap scan attempts instead of running one every animation frame (up to
-// 60/sec). 12/sec is still instant-feeling to a human and leaves the
-// device far less loaded, which also helps camera autofocus keep up.
-const SCAN_INTERVAL_MS = 80;
+// How often we attempt a decode. Native detector can run every animation
+// frame (it's fast enough); jsQR is throttled to stay light on the device.
+const NATIVE_SCAN_INTERVAL_MS = 0;
+const FALLBACK_SCAN_INTERVAL_MS = 80;
+
+// How long the "QR Detected" confirmation flashes before we hand off —
+// matches the brief green-checkmark flash you see in Google Lens / Android's
+// scanner before it acts on the code. Long enough to register, short enough
+// to still feel instant.
+const DETECTED_FLASH_MS = 260;
 
 export default function CameraScanner({ onResult, active }) {
   const videoRef = useRef(null);
@@ -24,8 +40,10 @@ export default function CameraScanner({ onResult, active }) {
   const rafRef = useRef(null);
   const hasResultRef = useRef(false);
   const lastScanRef = useRef(0);
+  const detectorRef = useRef(null);
+  const busyRef = useRef(false); // guards overlapping async native detect() calls
 
-  const [status, setStatus] = useState("starting"); // starting | ready | denied | unsupported | insecure
+  const [status, setStatus] = useState("starting"); // starting | ready | detected | denied | unsupported | insecure
   const [torchOn, setTorchOn] = useState(false);
   const [torchAvailable, setTorchAvailable] = useState(false);
 
@@ -52,6 +70,9 @@ export default function CameraScanner({ onResult, active }) {
   useEffect(() => {
     if (!active) return;
     hasResultRef.current = false;
+    busyRef.current = false;
+    lastScanRef.current = 0;
+    setStatus("starting");
     let cancelled = false;
 
     async function start() {
@@ -93,21 +114,70 @@ export default function CameraScanner({ onResult, active }) {
         const track = stream.getVideoTracks()[0];
         const caps = track.getCapabilities?.();
         setTorchAvailable(!!caps?.torch);
+
+        if (HAS_NATIVE_DETECTOR) {
+          try {
+            detectorRef.current = new window.BarcodeDetector({ formats: ["qr_code"] });
+          } catch {
+            detectorRef.current = null; // formats not supported — fall through to jsQR
+          }
+        }
+
         setStatus("ready");
-        tick();
+        rafRef.current = requestAnimationFrame(detectorRef.current ? tickNative : tickFallback);
       } catch (err) {
         setStatus("denied");
       }
     }
 
-    function tick(timestamp) {
+    // A code was found: flash "QR Detected" briefly (like the checkmark
+    // flash in Google Lens / Android's scanner) then hand off the value.
+    function handleDetected(value) {
+      hasResultRef.current = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      setStatus("detected");
+      setTimeout(() => {
+        if (!cancelled) onResult(value);
+      }, DETECTED_FLASH_MS);
+    }
+
+    // --- Native BarcodeDetector path: reads the <video> element directly,
+    // no canvas/getImageData round-trip, GPU-accelerated on supporting
+    // devices. This is what makes it feel as instant as a phone's built-in
+    // scanner. `detect()` is async, so we guard against overlapping calls
+    // piling up if a frame takes longer than expected.
+    async function tickNative(timestamp) {
       if (cancelled || hasResultRef.current) return;
-      rafRef.current = requestAnimationFrame(tick);
+      rafRef.current = requestAnimationFrame(tickNative);
+      if (busyRef.current) return;
+      if (timestamp - lastScanRef.current < NATIVE_SCAN_INTERVAL_MS) return;
+
+      const video = videoRef.current;
+      if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+      lastScanRef.current = timestamp;
+      busyRef.current = true;
+      try {
+        const codes = await detectorRef.current.detect(video);
+        if (!cancelled && !hasResultRef.current && codes && codes.length > 0 && codes[0].rawValue) {
+          handleDetected(codes[0].rawValue);
+        }
+      } catch {
+        // A transient decode error on one frame — just try again next frame.
+      } finally {
+        busyRef.current = false;
+      }
+    }
+
+    // --- jsQR fallback path (Safari/iOS, Firefox, or any browser without
+    // BarcodeDetector support for qr_code).
+    function tickFallback(timestamp) {
+      if (cancelled || hasResultRef.current) return;
+      rafRef.current = requestAnimationFrame(tickFallback);
 
       // Throttle: skip this frame unless enough time has passed since the
       // last decode attempt. Keeps CPU usage (and therefore lag) low
       // without any visible delay to the person scanning.
-      if (timestamp - lastScanRef.current < SCAN_INTERVAL_MS) return;
+      if (timestamp - lastScanRef.current < FALLBACK_SCAN_INTERVAL_MS) return;
 
       const video = videoRef.current;
       if (!video || video.readyState !== video.HAVE_ENOUGH_DATA || !video.videoWidth) return;
@@ -131,9 +201,7 @@ export default function CameraScanner({ onResult, active }) {
         inversionAttempts: "attemptBoth",
       });
       if (code && code.data) {
-        hasResultRef.current = true;
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        onResult(code.data);
+        handleDetected(code.data);
       }
     }
 
@@ -177,6 +245,16 @@ export default function CameraScanner({ onResult, active }) {
             <div style={scanLine} />
           </div>
         )}
+        {status === "detected" && (
+          <div style={detectedOverlay}>
+            <div style={detectedBadge}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>QR Detected</span>
+            </div>
+          </div>
+        )}
         {status === "starting" && <Overlay>Starting camera…</Overlay>}
         {status === "denied" && (
           <Overlay>
@@ -195,6 +273,9 @@ export default function CameraScanner({ onResult, active }) {
 
       {status === "ready" && (
         <p style={hint}>Point the camera at the QR code on your ID card</p>
+      )}
+      {status === "detected" && (
+        <p style={{ ...hint, color: "var(--success)", fontWeight: 600 }}>QR code detected — verifying…</p>
       )}
 
       {torchAvailable && status === "ready" && (
@@ -240,6 +321,28 @@ const overlay = {
 };
 
 const reticle = { position: "absolute", inset: 24, pointerEvents: "none" };
+
+const detectedOverlay = {
+  position: "absolute",
+  inset: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(15, 23, 42, 0.35)",
+};
+
+const detectedBadge = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  background: "var(--success)",
+  color: "#fff",
+  fontWeight: 700,
+  fontSize: 14,
+  padding: "10px 18px",
+  borderRadius: 999,
+  boxShadow: "0 4px 16px rgba(0,0,0,0.25)",
+};
 
 const corner = {
   position: "absolute",
