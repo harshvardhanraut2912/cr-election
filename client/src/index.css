@@ -21,9 +21,12 @@ body {
 button { font-family: inherit; cursor: pointer; }
 input, select { font-family: inherit; }
 
-/* Global compact UI scale — keeps the existing layouts and interactions intact. */
-#root {
-  zoom: 0.85;
-  width: 117.6470588%;
-  min-height: 117.6470588vh;
+/*
+ * Compact voting screens only.
+ * The identity-card / QR scanning page stays at 100% size.
+ * Voting, confirmation, welcome and success screens render at 90%.
+ */
+.compact-vote-page {
+  zoom: 0.9;
+  min-height: 111.111111vh;
 }

@@ -352,7 +352,7 @@ function initials(name = "") {
 }
 
 function ErrorBox({ message }) { return <div style={errorBox}>{message}</div>; }
-function Centered({ children }) { return <div style={{ minHeight: "100vh", display: "flex", justifyContent: "center", padding: "40px 16px" }}><div style={{ width: "100%", maxWidth: 460 }}>{children}</div></div>; }
+function Centered({ children }) { return <div className="compact-vote-page" style={{ minHeight: "100vh", display: "flex", justifyContent: "center", padding: "40px 16px" }}><div style={{ width: "100%", maxWidth: 460 }}>{children}</div></div>; }
 function CheckBadge() { return <div style={checkBadge}><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg></div>; }
 
 const verifyPage = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", background: "linear-gradient(180deg, #f5f7fb 0%, #eef1f6 100%)" };
