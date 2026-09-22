@@ -256,17 +256,17 @@ input, select { font-family: inherit; }
    above every TV element and fades in/out instantly with the Firestore setting. */
 .tv-qr-overlay { position:fixed; inset:0; z-index:99999; display:grid; place-items:center; padding:24px; animation:tvQrIn .28s cubic-bezier(.2,.8,.2,1) both; }
 .tv-qr-backdrop { position:absolute; inset:0; background:rgba(15,23,42,.46); backdrop-filter:blur(9px); -webkit-backdrop-filter:blur(9px); animation:tvQrShade .25s ease both; }
-.tv-qr-card { position:relative; z-index:1; width:min(540px,92vw); padding:28px 30px 24px; text-align:center; border:1px solid rgba(255,255,255,.9); border-radius:30px; background:rgba(255,255,255,.94); box-shadow:0 30px 90px rgba(2,6,23,.35),0 0 0 1px rgba(255,255,255,.4) inset; animation:tvQrCardIn .48s cubic-bezier(.16,1,.3,1) both; }
+.tv-qr-card { position:relative; z-index:1; width:min(600px,94vw); padding:28px 30px 24px; text-align:center; border:1px solid rgba(255,255,255,.9); border-radius:30px; background:rgba(255,255,255,.94); box-shadow:0 30px 90px rgba(2,6,23,.35),0 0 0 1px rgba(255,255,255,.4) inset; animation:tvQrCardIn .48s cubic-bezier(.16,1,.3,1) both; }
 .tv-qr-live { display:inline-flex; align-items:center; gap:7px; padding:7px 11px; border-radius:999px; background:#ecfdf3; color:#15803d; border:1px solid #d1fae5; font-size:9px; font-weight:950; letter-spacing:1.4px; }
 .tv-qr-live i { width:7px; height:7px; border-radius:50%; background:#22c55e; animation:livePulse 1.5s infinite; }
 .tv-qr-icon { margin:17px auto 9px; width:54px; height:54px; display:grid; place-items:center; border-radius:16px; color:#fff; font-size:10px; font-weight:950; letter-spacing:1px; background:linear-gradient(135deg,#2563eb,#7c3aed); box-shadow:0 12px 28px rgba(79,70,229,.25); }
 .tv-qr-card h2 { margin:0; font-size:34px; line-height:1.05; letter-spacing:-1.4px; }
 .tv-qr-card p { margin:9px auto 18px; max-width:390px; color:#717b8a; font-size:13px; line-height:1.55; }
-.tv-qr-image-wrap { width:min(330px,72vw); aspect-ratio:1; margin:0 auto 15px; padding:15px; border-radius:23px; background:#fff; border:1px solid #e5e9ef; box-shadow:0 15px 40px rgba(15,23,42,.1); }
+.tv-qr-image-wrap { width:min(390px,78vw); aspect-ratio:1; margin:0 auto 15px; padding:15px; border-radius:23px; background:#fff; border:1px solid #e5e9ef; box-shadow:0 15px 40px rgba(15,23,42,.1); }
 .tv-qr-image-wrap img { display:block; width:100%; height:100%; object-fit:contain; image-rendering:auto; }
 .tv-qr-url { margin:0 auto; max-width:430px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#475569; font-size:10px; font-weight:750; }
 .tv-qr-hint { margin-top:9px; color:#9aa2ae; font-size:8px; font-weight:900; letter-spacing:1.5px; }
 @keyframes tvQrIn { from { opacity:0; } to { opacity:1; } }
 @keyframes tvQrShade { from { opacity:0; } to { opacity:1; } }
 @keyframes tvQrCardIn { from { opacity:0; transform:translateY(18px) scale(.94); } to { opacity:1; transform:none; } }
-@media (max-width:600px) { .tv-qr-card { padding:22px 18px 19px; border-radius:24px; } .tv-qr-card h2 { font-size:29px; } .tv-qr-image-wrap { width:min(285px,76vw); } }
+@media (max-width:600px) { .tv-qr-card { padding:22px 18px 19px; border-radius:24px; } .tv-qr-card h2 { font-size:29px; } .tv-qr-image-wrap { width:min(330px,80vw); } }
