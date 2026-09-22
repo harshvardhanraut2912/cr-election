@@ -1,0 +1,31 @@
+rules_version = '2';
+
+// Single fixed election. ALL writes go through the Node.js backend (Admin SDK),
+// which bypasses these rules and performs the real checks (roll number / device /
+// name not already voted, valid elector IDs, etc). The browser only reads
+// public, non-sensitive data (elector names + live vote counts) for the TV
+// leaderboard and the vote page — it never writes to Firestore directly.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /candidates_boys/{candidateId} {
+      allow read: if true;   // needed for live leaderboard + vote page
+      allow write: if false; // only the backend (Admin SDK) may write
+    }
+
+    match /candidates_girls/{candidateId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /voters/{voterId} {
+      allow read: if false;  // roll number -> name/choice mapping, never public
+      allow write: if false;
+    }
+
+    match /devices/{deviceId} {
+      allow read: if false;  // device identifiers, never public
+      allow write: if false;
+    }
+  }
+}

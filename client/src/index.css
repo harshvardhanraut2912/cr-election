@@ -1,0 +1,22 @@
+* { box-sizing: border-box; }
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e2e5ea;
+  --text: #1a1d23;
+  --text-muted: #6b7280;
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --success-bg: #f0fdf4;
+}
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+button { font-family: inherit; cursor: pointer; }
+input, select { font-family: inherit; }

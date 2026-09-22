@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build output
+client/dist/
+server/dist/
+
+# Environment variables (never commit secrets)
+.env
+.env.local
+.env.*.local
+client/.env
+server/.env
+
+# Firebase service account (secret key — never commit)
+server/serviceAccountKey.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor/OS
+.DS_Store
+.vscode/
+.idea/
+
+# Vercel
+.vercel
