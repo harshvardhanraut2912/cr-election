@@ -5,11 +5,30 @@
 // is only needed if you ever host the API on a different origin.
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
+// A request that never resolves (dropped connection, sleeping serverless
+// function, etc) used to leave buttons stuck on "Submitting…" forever with
+// no feedback. This caps every call so it always ends in either a result or
+// a clear error the UI can show.
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    });
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("The request timed out. Please check your connection and try again.");
+    }
+    throw new Error("Network error. Please check your connection and try again.");
+  } finally {
+    clearTimeout(timeout);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || `Request failed (${res.status})`);

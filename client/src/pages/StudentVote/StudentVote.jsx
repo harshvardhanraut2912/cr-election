@@ -82,6 +82,10 @@ export default function StudentVote() {
   }
 
   function handleGoToConfirm() {
+    if (voting.phase !== "live" && voting.phase !== "grace") {
+      setError("Voting is closed. You can't vote now.");
+      return;
+    }
     if (!boysChoice || !girlsChoice) {
       setError("Please select one Boys CR and one Girls CR candidate.");
       return;
@@ -92,6 +96,10 @@ export default function StudentVote() {
 
   async function handleSubmit() {
     if (!student || !boysChoice || !girlsChoice || loading) return;
+    if (voting.phase !== "live" && voting.phase !== "grace") {
+      setError("Voting is closed. You can't vote now.");
+      return;
+    }
     setLoading(true);
     setError("");
     setSubmitPulse(true);
@@ -120,6 +128,7 @@ export default function StudentVote() {
       <ScanScreen
         error={error}
         scanning={scanning}
+        voting={voting}
         onCameraResult={handleCardScanned}
       />
     );
@@ -132,7 +141,7 @@ export default function StudentVote() {
         alreadyVoted={stage === STAGES.ALREADY_VOTED}
         error={error}
         loading={loading}
-        votingPhase={voting.phase}
+        voting={voting}
         onConfirm={handleConfirmStudent}
         onScanAnother={handleScanAnother}
       />
@@ -209,7 +218,7 @@ export default function StudentVote() {
 
             <div className={`submit-zone ${submitPulse ? "is-submitting" : ""}`}>
               <button className="mac-primary-button ballot-submit" onClick={handleSubmit} disabled={loading || voting.phase === "closed"}>
-                {loading ? <><span className="spinner" />Submitting securely…</> : voting.phase === "closed" ? "Voting has closed" : <>Confirm & Submit Vote <span className="button-arrow">→</span></>}
+                {loading ? <><span className="spinner" />Submitting securely…</> : voting.phase === "closed" ? "Voting is closed" : <>Confirm & Submit Vote <span className="button-arrow">→</span></>}
               </button>
               <button className="mac-ghost-button" onClick={() => setStage(STAGES.VOTING)} disabled={loading}>Back to ballot</button>
             </div>
@@ -266,14 +275,15 @@ function VotingWindowBanner({ voting }) {
   if (voting.phase === "closed") {
     return (
       <div className="voting-timer-banner is-closed">
-        Voting has closed. Your submission may no longer be accepted.
+        Voting is closed. You can't vote now.
       </div>
     );
   }
   return null;
 }
 
-function VerificationScreen({ student, alreadyVoted, error, loading, votingPhase, onConfirm, onScanAnother }) {
+function VerificationScreen({ student, alreadyVoted, error, loading, voting, onConfirm, onScanAnother }) {
+  const votingPhase = voting.phase;
   const votingNotLive = !alreadyVoted && votingPhase !== "live";
   const confirmLabel = loading
     ? "Checking election record…"
@@ -291,6 +301,13 @@ function VerificationScreen({ student, alreadyVoted, error, loading, votingPhase
           <div style={eyebrow}>{alreadyVoted ? "VOTING ALREADY COMPLETED" : "ID CARD SCANNED"}</div>
           <h1 style={verifyTitle}>{alreadyVoted ? "You have already voted" : "Confirm student details"}</h1>
           <p style={verifySubtitle}>{alreadyVoted ? "This student cannot submit another vote in this election." : "Review the information below before continuing to the ballot."}</p>
+          {!alreadyVoted && (
+            <div className={`voting-timer-banner ${votingPhase === "live" ? "" : votingPhase === "idle" ? "" : "is-closed"}`}>
+              {votingPhase === "live" && <>Time remaining to vote: <strong>{formatVotingClock(voting.remainingMs)}</strong></>}
+              {votingPhase === "idle" && "Voting isn't started yet. Please wait a while — it will unlock automatically as soon as it begins."}
+              {(votingPhase === "grace" || votingPhase === "closed") && "Voting is closed. You can't vote now."}
+            </div>
+          )}
           {error && <ErrorBox message={error} />}
           <div style={detailsCard}>
             <Detail label="STUDENT NAME" value={student?.name} full />
@@ -305,13 +322,6 @@ function VerificationScreen({ student, alreadyVoted, error, loading, votingPhase
           ) : (
             <button style={verifyPrimary} onClick={onScanAnother}>Scan another card</button>
           )}
-          {votingNotLive && (
-            <div className="voting-locked-note">
-              {votingPhase === "idle"
-                ? "Voting isn't started yet. Please wait a while — it will unlock automatically as soon as it begins."
-                : "Voting has ended. New votes can no longer be started."}
-            </div>
-          )}
           {!alreadyVoted && <button style={textButton} onClick={onScanAnother} disabled={loading}>Scan another card</button>}
         </div>
       </div>
@@ -323,13 +333,20 @@ function Detail({ label, value, full }) {
   return <div style={{ ...detailBlock, ...(full ? detailFull : {}) }}><div style={detailLabel}>{label}</div><div style={detailValue}>{value || "—"}</div></div>;
 }
 
-function ScanScreen({ error, scanning, onCameraResult }) {
+function ScanScreen({ error, scanning, voting, onCameraResult }) {
+  const phase = voting?.phase;
   return (
     <div style={scanScreenWrap}>
       <div style={scanCard}>
         <div style={brandRow}><div style={brandMark}>CR</div><span style={brandText}>Class Representative Election</span></div>
         <h1 style={scanTitle}>Scan your identity card</h1>
         <p style={scanSubtitle}>Place the barcode or QR code inside the frame. It will be detected automatically.</p>
+        {phase && phase !== "idle" && (
+          <div className={`voting-timer-banner ${phase === "live" ? "" : "is-closed"}`}>
+            {phase === "live" && <>Time remaining to vote: <strong>{formatVotingClock(voting.remainingMs)}</strong></>}
+            {(phase === "grace" || phase === "closed") && "Voting is closed. You can't vote now."}
+          </div>
+        )}
         {error && <ErrorBox message={error} />}
         {scanning && <p style={scanStatus}>Reading student record…</p>}
         <CameraScanner active={!scanning} onResult={onCameraResult} />
