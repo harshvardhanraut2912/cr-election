@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLiveCandidates } from "../../hooks/useLiveCandidates.js";
 import { useDisplaySettings } from "../../hooks/useDisplaySettings.js";
+import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
 
 const AVATAR_TONES = ["blue", "violet", "cyan", "rose", "amber", "emerald", "indigo", "pink"];
 
@@ -131,6 +132,7 @@ function Leaderboard({ title, eyebrow, rows, accent }) {
 export default function AdminTV() {
   const { boys, girls } = useLiveCandidates();
   const { showQr } = useDisplaySettings();
+  const voting = useVotingWindow();
   const totalVotes = boys.reduce((sum, c) => sum + (c.votes || 0), 0) + girls.reduce((sum, c) => sum + (c.votes || 0), 0);
 
   return (
@@ -148,7 +150,10 @@ export default function AdminTV() {
               <span>Class Representative Elections</span>
             </div>
           </div>
-          <div className="tv-live-pill"><i /> LIVE · REAL-TIME</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {voting.phase !== "idle" && <VotingTimerPill phase={voting.phase} remainingMs={voting.remainingMs} />}
+            <div className="tv-live-pill"><i /> LIVE · REAL-TIME</div>
+          </div>
         </div>
 
         <div className="tv-title-wrap">
@@ -176,7 +181,35 @@ export default function AdminTV() {
       </footer>
 
       {showQr && <QrOverlay />}
+      {voting.phase === "grace" && <GraceOverlay remainingMs={voting.remainingMs} />}
     </main>
+  );
+}
+
+function VotingTimerPill({ phase, remainingMs }) {
+  const text =
+    phase === "live"
+      ? `VOTING ENDS IN ${formatVotingClock(remainingMs)}`
+      : phase === "grace"
+      ? `CLOSING · ${Math.ceil((remainingMs || 0) / 1000)}S`
+      : "VOTING CLOSED";
+  return <div className={`tv-timer-pill ${phase === "grace" ? "is-grace" : ""}`}><i /> {text}</div>;
+}
+
+function GraceOverlay({ remainingMs }) {
+  const seconds = Math.max(0, Math.ceil((remainingMs || 0) / 1000));
+  return (
+    <div className="tv-grace-overlay" role="dialog" aria-label="Voting closing">
+      <div className="tv-qr-backdrop" />
+      <div className="tv-grace-card">
+        <div className="tv-qr-live"><i /> VOTING CLOSING</div>
+        <h2 style={{ margin: "14px 0 0" }}>Waiting for students to submit</h2>
+        <div className="tv-grace-count">{seconds}</div>
+        <p style={{ margin: 0, color: "#717b8a", fontSize: 13 }}>
+          Students already on the ballot have a few seconds left to confirm their vote.
+        </p>
+      </div>
+    </div>
   );
 }
 

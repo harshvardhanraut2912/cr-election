@@ -1,5 +1,6 @@
 import { db, FieldValue } from "../services/firebaseAdmin.js";
 import { findStudentByCardId } from "../services/studentsStore.js";
+import { getVotingDoc, computeVotingPhase } from "../services/votingWindow.js";
 
 function rollDocId(rollNumber) {
   return `roll_${String(rollNumber).trim()}`;
@@ -45,6 +46,20 @@ export async function validateVoter(req, res) {
     const { name, rollNumber, deviceId } = req.body;
     if (!name || !name.trim() || !rollNumber || !String(rollNumber).trim() || !deviceId) {
       return res.status(400).json({ error: "Name, roll number and device are required" });
+    }
+
+    // New confirmations are only allowed while voting is actually live — this
+    // is what keeps "Confirm & Continue" locked before the admin starts
+    // voting, and locked again the instant "End Voting" is clicked. Students
+    // who already made it past this check keep going through castVote below,
+    // which allows a short grace window.
+    const votingPhase = computeVotingPhase(await getVotingDoc()).phase;
+    if (votingPhase !== "live") {
+      const message =
+        votingPhase === "idle"
+          ? "Voting hasn't started yet. Please wait for the election desk to begin voting."
+          : "Voting has ended. New votes can no longer be started.";
+      return res.status(403).json({ error: message, votingPhase });
     }
 
     const voterRef = db.collection("voters").doc(rollDocId(rollNumber));
@@ -93,6 +108,13 @@ export async function castVote(req, res) {
       return res.status(400).json({
         error: "name, rollNumber, deviceId, boysCandidateId and girlsCandidateId are all required",
       });
+    }
+
+    // Students already on the ballot get the grace window too (not just
+    // "live") — this is the 20-second buffer after voting closes.
+    const votingPhase = computeVotingPhase(await getVotingDoc()).phase;
+    if (votingPhase !== "live" && votingPhase !== "grace") {
+      return res.status(403).json({ error: "Voting has closed. Your vote could not be recorded.", votingPhase });
     }
 
     const voterRef = db.collection("voters").doc(rollDocId(rollNumber));

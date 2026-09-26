@@ -62,3 +62,9 @@ export const adminSetQrDisplay = (showQr) =>
     headers: adminHeaders(),
     body: JSON.stringify({ showQr: Boolean(showQr) }),
   });
+
+export const adminStartVoting = () => request(`/admin/voting/start`, { method: "POST", headers: adminHeaders() });
+
+export const adminExtendVoting = () => request(`/admin/voting/extend`, { method: "POST", headers: adminHeaders() });
+
+export const adminEndVoting = () => request(`/admin/voting/end`, { method: "POST", headers: adminHeaders() });

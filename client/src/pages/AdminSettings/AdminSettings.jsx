@@ -7,7 +7,11 @@ import {
   adminRemoveCandidate,
   adminClearSubmissionData,
   adminSetQrDisplay,
+  adminStartVoting,
+  adminExtendVoting,
+  adminEndVoting,
 } from "../../services/api.js";
+import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
 
 export default function AdminSettings() {
   const [token, setToken] = useState(localStorage.getItem("cr_election_admin_token") || "");
@@ -17,6 +21,8 @@ export default function AdminSettings() {
   const [clearing, setClearing] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [qrSaving, setQrSaving] = useState(false);
+  const [votingBusy, setVotingBusy] = useState(false);
+  const voting = useVotingWindow();
 
   const [category, setCategory] = useState("boys");
   const [name, setName] = useState("");
@@ -93,6 +99,53 @@ export default function AdminSettings() {
     }
   }
 
+  async function handleStartVoting() {
+    setError("");
+    setNotice("");
+    setVotingBusy(true);
+    try {
+      await adminStartVoting();
+      setNotice("Voting is now live for 10 minutes. The QR overlay has been hidden on the TV.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setVotingBusy(false);
+    }
+  }
+
+  async function handleExtendVoting() {
+    setError("");
+    setNotice("");
+    setVotingBusy(true);
+    try {
+      await adminExtendVoting();
+      setNotice("Added 1 minute to the voting window.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setVotingBusy(false);
+    }
+  }
+
+  async function handleEndVoting() {
+    const confirmed = window.confirm(
+      "End voting now?\n\nNo new votes can be started after this. Students already on the ballot screen get 20 seconds to submit."
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setNotice("");
+    setVotingBusy(true);
+    try {
+      await adminEndVoting();
+      setNotice("Voting has been ended. Students already on the ballot have 20 seconds left to submit.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setVotingBusy(false);
+    }
+  }
+
   async function handleClearSubmissionData() {
     const confirmed = window.confirm(
       "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record and reset every elector's vote count to 0.\n\nThe elector names and student roster will NOT be deleted."
@@ -150,6 +203,14 @@ export default function AdminSettings() {
         </div>
       </Section>
 
+      <VotingSection
+        voting={voting}
+        busy={votingBusy}
+        onStart={handleStartVoting}
+        onExtend={handleExtendVoting}
+        onEnd={handleEndVoting}
+      />
+
       <QrSection
         enabled={showQr}
         saving={qrSaving}
@@ -176,6 +237,75 @@ function CandidateList({ title, category, items, onRemove }) {
         </div>
       ))}
       {items.length === 0 && <p style={{ color: "var(--text-muted)" }}>No electors yet.</p>}
+    </div>
+  );
+}
+
+const VOTING_PHASE_COPY = {
+  idle: { label: "NOT STARTED", color: "#64748b", bg: "#f1f5f9", border: "#e2e8f0" },
+  live: { label: "LIVE", color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
+  grace: { label: "CLOSING", color: "#c2410c", bg: "#fff7ed", border: "#fed7aa" },
+  closed: { label: "ENDED", color: "#991b1b", bg: "#fef2f2", border: "#fecaca" },
+};
+
+function VotingSection({ voting, busy, onStart, onExtend, onEnd }) {
+  const phase = voting.phase;
+  const tone = VOTING_PHASE_COPY[phase] || VOTING_PHASE_COPY.idle;
+
+  let clockText = "—:—";
+  if (phase === "live") clockText = formatVotingClock(voting.remainingMs);
+  else if (phase === "grace") clockText = `${Math.ceil((voting.remainingMs || 0) / 1000)}s`;
+  else if (phase === "closed") clockText = "Closed";
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #fbfaff, #f5faff)",
+      border: "1px solid #e3e0fb",
+      borderRadius: 16,
+      padding: 20,
+      marginBottom: 20,
+      boxShadow: "0 8px 24px rgba(79, 70, 229, 0.06)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <h3 style={{ margin: 0 }}>Voting Window</h3>
+          <p style={{ margin: "5px 0 0", color: "var(--text-muted)", lineHeight: 1.45, fontSize: 14 }}>
+            Starting voting unlocks "Confirm &amp; Continue" on every student device instantly and force-closes the TV's QR overlay.
+          </p>
+        </div>
+        <span style={{
+          padding: "6px 12px", borderRadius: 999, fontSize: 11, fontWeight: 900, letterSpacing: 1,
+          color: tone.color, background: tone.bg, border: `1px solid ${tone.border}`,
+        }}>{tone.label}</span>
+      </div>
+
+      <div style={{ marginTop: 16, fontSize: phase === "grace" ? 34 : 30, fontWeight: 900, letterSpacing: -1, color: tone.color }}>
+        {clockText}
+        {phase === "live" && <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)", marginLeft: 10 }}>remaining</span>}
+        {phase === "grace" && <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-muted)", marginLeft: 10 }}>grace period left</span>}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+        <button type="button" style={primaryButton} onClick={onStart} disabled={busy || phase === "live"}>
+          {phase === "live" ? "Voting Live" : "Start Voting"}
+        </button>
+        <button
+          type="button"
+          style={{ ...inputStyle, fontWeight: 700, cursor: busy || phase !== "live" ? "not-allowed" : "pointer", opacity: busy || phase !== "live" ? 0.55 : 1 }}
+          onClick={onExtend}
+          disabled={busy || phase !== "live"}
+        >
+          +1 Minute
+        </button>
+        <button
+          type="button"
+          style={{ ...dangerButton, padding: "10px 16px", fontWeight: 700, opacity: busy || (phase !== "live" && phase !== "grace") ? 0.55 : 1, cursor: busy || (phase !== "live" && phase !== "grace") ? "not-allowed" : "pointer" }}
+          onClick={onEnd}
+          disabled={busy || (phase !== "live" && phase !== "grace")}
+        >
+          End Voting
+        </button>
+      </div>
     </div>
   );
 }

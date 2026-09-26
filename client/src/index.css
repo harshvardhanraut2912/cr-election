@@ -270,3 +270,22 @@ input, select { font-family: inherit; }
 @keyframes tvQrShade { from { opacity:0; } to { opacity:1; } }
 @keyframes tvQrCardIn { from { opacity:0; transform:translateY(18px) scale(.94); } to { opacity:1; transform:none; } }
 @media (max-width:600px) { .tv-qr-card { padding:22px 18px 19px; border-radius:24px; } .tv-qr-card h2 { font-size:29px; } .tv-qr-image-wrap { width:min(330px,80vw); } }
+
+/* Voting window: student ballot timer/lock banners (StudentVote.jsx) and
+   TV timer pill + grace-period overlay (AdminTV.jsx). Added alongside the
+   existing QR overlay above — same visual language, new purpose. */
+.voting-timer-banner { margin:14px 0; padding:10px 14px; border-radius:12px; background:#eef2ff; border:1px solid #dbe0fb; color:#3730a3; font-size:13px; font-weight:700; text-align:center; }
+.voting-timer-banner.is-grace { background:#fff7ed; border-color:#fed7aa; color:#9a3412; animation:gracePulse 1s infinite; }
+.voting-timer-banner.is-closed { background:#fef2f2; border-color:#fecaca; color:#991b1b; }
+.voting-locked-note { margin-top:16px; padding:12px 14px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; color:#64748b; font-size:13px; font-weight:600; text-align:center; line-height:1.45; }
+@keyframes gracePulse { 0%,100% { box-shadow:0 0 0 0 rgba(234,88,12,.18); } 50% { box-shadow:0 0 0 8px rgba(234,88,12,0); } }
+
+.tv-timer-pill { display:flex; align-items:center; gap:7px; padding:8px 11px; border-radius:999px; color:#3730a3; background:rgba(238,242,255,.9); border:1px solid #dde6fb; font-size:9px; font-weight:900; letter-spacing:1px; }
+.tv-timer-pill i { width:7px; height:7px; border-radius:50%; background:#4f46e5; }
+.tv-timer-pill.is-grace { color:#9a3412; background:rgba(255,247,237,.92); border-color:#fed7aa; }
+.tv-timer-pill.is-grace i { background:#ea580c; animation:livePulse 1s infinite; }
+
+.tv-grace-overlay { position:fixed; inset:0; z-index:99999; display:grid; place-items:center; padding:24px; animation:tvQrIn .28s cubic-bezier(.2,.8,.2,1) both; }
+.tv-grace-card { position:relative; z-index:1; width:min(560px,94vw); padding:34px 30px; text-align:center; border:1px solid rgba(255,255,255,.9); border-radius:30px; background:rgba(255,255,255,.96); box-shadow:0 30px 90px rgba(2,6,23,.35),0 0 0 1px rgba(255,255,255,.4) inset; animation:tvQrCardIn .48s cubic-bezier(.16,1,.3,1) both; }
+.tv-grace-count { font-size:96px; font-weight:950; letter-spacing:-3px; color:#c2410c; margin:10px 0; line-height:1; animation:gracePulse 1s infinite; }
+@media (max-width:600px) { .tv-grace-card { padding:26px 18px; } .tv-grace-count { font-size:70px; } }

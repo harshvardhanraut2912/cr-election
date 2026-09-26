@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { getDeviceToken } from "../../utils/deviceToken.js";
 import { lookupStudentByCard, validateVoter, getCandidates, castVote } from "../../services/api.js";
+import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
 import CameraScanner from "./CameraScanner.jsx";
 
 const STAGES = {
@@ -25,6 +26,7 @@ export default function StudentVote() {
   const [girlsChoice, setGirlsChoice] = useState(null);
 
   const deviceId = useMemo(() => getDeviceToken(), []);
+  const voting = useVotingWindow();
 
   async function handleCardScanned(rawValue) {
     const misId = String(rawValue || "").trim().toUpperCase();
@@ -130,6 +132,7 @@ export default function StudentVote() {
         alreadyVoted={stage === STAGES.ALREADY_VOTED}
         error={error}
         loading={loading}
+        votingPhase={voting.phase}
         onConfirm={handleConfirmStudent}
         onScanAnother={handleScanAnother}
       />
@@ -141,6 +144,7 @@ export default function StudentVote() {
       <main className="vote-page vote-page-enter">
         <div className="vote-shell">
           <ElectionHeader student={student} />
+          <VotingWindowBanner voting={voting} />
           {error && <ErrorBox message={error} />}
 
           <section className="ballot-card">
@@ -190,6 +194,7 @@ export default function StudentVote() {
       <main className="vote-page vote-page-enter">
         <div className="vote-shell confirm-shell">
           <ElectionHeader student={student} compact />
+          <VotingWindowBanner voting={voting} />
           {error && <ErrorBox message={error} />}
           <section className="ballot-card confirmation-card">
             <div className="confirm-icon">✓</div>
@@ -203,8 +208,8 @@ export default function StudentVote() {
             </div>
 
             <div className={`submit-zone ${submitPulse ? "is-submitting" : ""}`}>
-              <button className="mac-primary-button ballot-submit" onClick={handleSubmit} disabled={loading}>
-                {loading ? <><span className="spinner" />Submitting securely…</> : <>Confirm & Submit Vote <span className="button-arrow">→</span></>}
+              <button className="mac-primary-button ballot-submit" onClick={handleSubmit} disabled={loading || voting.phase === "closed"}>
+                {loading ? <><span className="spinner" />Submitting securely…</> : voting.phase === "closed" ? "Voting has closed" : <>Confirm & Submit Vote <span className="button-arrow">→</span></>}
               </button>
               <button className="mac-ghost-button" onClick={() => setStage(STAGES.VOTING)} disabled={loading}>Back to ballot</button>
             </div>
@@ -243,7 +248,40 @@ function ElectionHeader({ student, compact = false }) {
   );
 }
 
-function VerificationScreen({ student, alreadyVoted, error, loading, onConfirm, onScanAnother }) {
+function VotingWindowBanner({ voting }) {
+  if (voting.phase === "live") {
+    return (
+      <div className="voting-timer-banner">
+        Time remaining to vote: <strong>{formatVotingClock(voting.remainingMs)}</strong>
+      </div>
+    );
+  }
+  if (voting.phase === "grace") {
+    return (
+      <div className="voting-timer-banner is-grace">
+        Voting is closing — submit within <strong>{Math.ceil((voting.remainingMs || 0) / 1000)}s</strong>
+      </div>
+    );
+  }
+  if (voting.phase === "closed") {
+    return (
+      <div className="voting-timer-banner is-closed">
+        Voting has closed. Your submission may no longer be accepted.
+      </div>
+    );
+  }
+  return null;
+}
+
+function VerificationScreen({ student, alreadyVoted, error, loading, votingPhase, onConfirm, onScanAnother }) {
+  const votingNotLive = !alreadyVoted && votingPhase !== "live";
+  const confirmLabel = loading
+    ? "Checking election record…"
+    : votingPhase === "idle"
+    ? "Waiting for voting to start…"
+    : votingPhase === "grace" || votingPhase === "closed"
+    ? "Voting has ended"
+    : "Confirm & Continue";
   return (
     <div className="verify-page-compact" style={verifyPage}>
       <div style={verifyCard} className="verify-card-modern">
@@ -263,9 +301,16 @@ function VerificationScreen({ student, alreadyVoted, error, loading, onConfirm, 
             </div>
           </div>
           {!alreadyVoted ? (
-            <button style={verifyPrimary} onClick={onConfirm} disabled={loading}>{loading ? "Checking election record…" : "Confirm & Continue"}</button>
+            <button style={verifyPrimary} onClick={onConfirm} disabled={loading || votingNotLive}>{confirmLabel}</button>
           ) : (
             <button style={verifyPrimary} onClick={onScanAnother}>Scan another card</button>
+          )}
+          {votingNotLive && (
+            <div className="voting-locked-note">
+              {votingPhase === "idle"
+                ? "Voting isn't started yet. Please wait a while — it will unlock automatically as soon as it begins."
+                : "Voting has ended. New votes can no longer be started."}
+            </div>
           )}
           {!alreadyVoted && <button style={textButton} onClick={onScanAnother} disabled={loading}>Scan another card</button>}
         </div>
