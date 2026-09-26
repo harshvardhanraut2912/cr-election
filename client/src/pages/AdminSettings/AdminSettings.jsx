@@ -148,7 +148,7 @@ export default function AdminSettings() {
 
   async function handleClearSubmissionData() {
     const confirmed = window.confirm(
-      "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record and reset every elector's vote count to 0.\n\nThe elector names and student roster will NOT be deleted."
+      "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record, reset every elector's vote count to 0, and reset the voting window back to Not Started (fresh start — you'll need to click Start Voting again).\n\nThe elector names and student roster will NOT be deleted."
     );
     if (!confirmed) return;
 
@@ -159,7 +159,7 @@ export default function AdminSettings() {
     try {
       const result = await adminClearSubmissionData();
       setNotice(
-        `Election data cleared successfully. ${result.votersDeleted || 0} student submissions removed and ${result.electorsReset || 0} elector counts reset.`
+        `Election data cleared successfully. ${result.votersDeleted || 0} student submissions removed, ${result.electorsReset || 0} elector counts reset, and the voting window is back to a fresh start.`
       );
       await refresh();
     } catch (err) {

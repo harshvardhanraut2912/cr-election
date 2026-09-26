@@ -1,6 +1,6 @@
 import { db, FieldValue } from "../services/firebaseAdmin.js";
 import { findStudentByCardId } from "../services/studentsStore.js";
-import { getVotingDoc, computeVotingPhase } from "../services/votingWindow.js";
+import { getVotingDoc, computeVotingPhase, DEFAULT_DURATION_MINUTES } from "../services/votingWindow.js";
 
 function rollDocId(rollNumber) {
   return `roll_${String(rollNumber).trim()}`;
@@ -228,6 +228,20 @@ export async function clearSubmissionData(req, res) {
       resetVotes(boysSnap),
       resetVotes(girlsSnap),
     ]);
+
+    // Fresh start: also reset the voting window itself, so Clear All doesn't
+    // leave voting stuck live/ended from the previous run — admin has to hit
+    // "Start Voting" again for a new round.
+    await db.collection("settings").doc("voting").set(
+      {
+        status: "idle",
+        startedAt: null,
+        durationMinutes: DEFAULT_DURATION_MINUTES,
+        endedAt: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: false }
+    );
 
     res.json({
       ok: true,
