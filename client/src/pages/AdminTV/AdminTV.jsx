@@ -225,7 +225,7 @@ function QrOverlay() {
         <div className="tv-qr-image-wrap">
           <img src="/student-vote-qr.png" alt="QR code for student voting" />
         </div>
-        <div className="tv-qr-url">cr-election-7kjkr9lat-cetwalle.vercel.app/student/vote</div>
+        <div className="tv-qr-url">https://cr-election-git-main-cetwalle.vercel.app/student/vote</div>
         <div className="tv-qr-hint">PICT · FIRST YEAR · FY-08</div>
       </div>
     </div>
