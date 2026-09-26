@@ -75,6 +75,18 @@ export const adminRemoveCandidate = (category, candidateId) =>
 export const adminClearSubmissionData = () =>
   request(`/admin/submissions`, { method: "DELETE", headers: adminHeaders() });
 
+// Manual vote tool (settings page): look up a student by roll number, then
+// cast a vote on their behalf — for a student whose ID card couldn't scan.
+export const adminLookupStudentByRoll = (rollNumber) =>
+  request(`/admin/vote/lookup`, { method: "POST", headers: adminHeaders(), body: JSON.stringify({ rollNumber }) });
+
+export const adminCastManualVote = ({ rollNumber, name, boysCandidateId, girlsCandidateId }) =>
+  request(`/admin/vote/cast`, {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({ rollNumber, name, boysCandidateId, girlsCandidateId }),
+  });
+
 export const adminSetQrDisplay = (showQr) =>
   request(`/admin/display/qr`, {
     method: "PUT",

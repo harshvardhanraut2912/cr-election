@@ -1,6 +1,6 @@
 import { db, FieldValue } from "../services/firebaseAdmin.js";
-import { findStudentByCardId } from "../services/studentsStore.js";
-import { getVotingDoc, computeVotingPhase, DEFAULT_DURATION_MINUTES } from "../services/votingWindow.js";
+import { findStudentByCardId, findStudentByRollNumber } from "../services/studentsStore.js";
+import { getVotingDoc, computeVotingPhase } from "../services/votingWindow.js";
 
 function rollDocId(rollNumber) {
   return `roll_${String(rollNumber).trim()}`;
@@ -184,6 +184,104 @@ export async function castVote(req, res) {
   }
 }
 
+// Admin: looks up a student by roll number (e.g. "10821") for the manual-vote
+// tool on the settings page — for a student whose ID card couldn't be scanned.
+export async function adminLookupStudent(req, res) {
+  try {
+    const { rollNumber } = req.body;
+    if (!rollNumber || !String(rollNumber).trim()) {
+      return res.status(400).json({ error: "Enter a roll number to search" });
+    }
+
+    const student = findStudentByRollNumber(rollNumber);
+    if (!student) {
+      return res.status(404).json({ error: "No student found with that roll number" });
+    }
+
+    res.json({
+      ok: true,
+      rollNumber: student.roll_no,
+      name: student.student_name,
+      division: student.division,
+      misId: student.mis_id,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Lookup failed" });
+  }
+}
+
+// Admin: records a vote on behalf of a student found via adminLookupStudent
+// above (roll-number search instead of a card scan). Enforces the same
+// one-vote-per-roll-number / one-vote-per-name guarantees as the student flow,
+// but intentionally skips the live-voting-window gate and the device check —
+// this is an admin override for a student who couldn't use their own device.
+export async function adminCastVote(req, res) {
+  try {
+    const { rollNumber, name, boysCandidateId, girlsCandidateId } = req.body;
+    if (!rollNumber || !name || !boysCandidateId || !girlsCandidateId) {
+      return res.status(400).json({
+        error: "rollNumber, name, boysCandidateId and girlsCandidateId are all required",
+      });
+    }
+
+    const voterRef = db.collection("voters").doc(rollDocId(rollNumber));
+    const boysCandidateRef = candidatesCollection("boys").doc(boysCandidateId);
+    const girlsCandidateRef = candidatesCollection("girls").doc(girlsCandidateId);
+
+    const nameMatchSnap = await db
+      .collection("voters")
+      .where("name", "==", name.trim())
+      .where("voted", "==", true)
+      .limit(1)
+      .get();
+    if (!nameMatchSnap.empty) {
+      return res.status(403).json({ error: "A vote has already been submitted under this name" });
+    }
+
+    await db.runTransaction(async (tx) => {
+      const [voterDoc, boysDoc, girlsDoc] = await Promise.all([
+        tx.get(voterRef),
+        tx.get(boysCandidateRef),
+        tx.get(girlsCandidateRef),
+      ]);
+
+      if (voterDoc.exists && voterDoc.data().voted) {
+        throw { status: 403, message: "This roll number has already voted" };
+      }
+      if (!boysDoc.exists) throw { status: 400, message: "Invalid Boys elector" };
+      if (!girlsDoc.exists) throw { status: 400, message: "Invalid Girls elector" };
+
+      const votedAt = FieldValue.serverTimestamp();
+
+      tx.set(
+        voterRef,
+        {
+          name: name.trim(),
+          deviceId: "admin-manual",
+          voted: true,
+          boysChoice: boysCandidateId,
+          girlsChoice: girlsCandidateId,
+          votedAt,
+          castBy: "admin",
+        },
+        { merge: true }
+      );
+
+      tx.update(boysCandidateRef, { votes: FieldValue.increment(1) });
+      tx.update(girlsCandidateRef, { votes: FieldValue.increment(1) });
+    });
+
+    res.json({ ok: true, message: "Vote recorded manually" });
+  } catch (err) {
+    if (err && err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Failed to record vote" });
+  }
+}
+
 // Admin: completely reset the submitted-vote state without deleting the elector roster.
 // This removes all voter/device submission records and resets every elector's vote count to 0.
 export async function clearSubmissionData(req, res) {
@@ -228,20 +326,6 @@ export async function clearSubmissionData(req, res) {
       resetVotes(boysSnap),
       resetVotes(girlsSnap),
     ]);
-
-    // Fresh start: also reset the voting window itself, so Clear All doesn't
-    // leave voting stuck live/ended from the previous run — admin has to hit
-    // "Start Voting" again for a new round.
-    await db.collection("settings").doc("voting").set(
-      {
-        status: "idle",
-        startedAt: null,
-        durationMinutes: DEFAULT_DURATION_MINUTES,
-        endedAt: null,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: false }
-    );
 
     res.json({
       ok: true,

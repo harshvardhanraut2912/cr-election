@@ -10,6 +10,8 @@ import {
   adminStartVoting,
   adminExtendVoting,
   adminEndVoting,
+  adminLookupStudentByRoll,
+  adminCastManualVote,
 } from "../../services/api.js";
 import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
 
@@ -26,6 +28,13 @@ export default function AdminSettings() {
 
   const [category, setCategory] = useState("boys");
   const [name, setName] = useState("");
+
+  const [manualRoll, setManualRoll] = useState("");
+  const [manualStudent, setManualStudent] = useState(null);
+  const [manualSearching, setManualSearching] = useState(false);
+  const [manualBoysChoice, setManualBoysChoice] = useState("");
+  const [manualGirlsChoice, setManualGirlsChoice] = useState("");
+  const [manualSubmitting, setManualSubmitting] = useState(false);
 
   function saveToken(t) {
     setToken(t);
@@ -99,6 +108,59 @@ export default function AdminSettings() {
     }
   }
 
+  async function handleManualSearch(e) {
+    e.preventDefault();
+    if (!manualRoll.trim()) return;
+    setError("");
+    setNotice("");
+    setManualSearching(true);
+    setManualStudent(null);
+    setManualBoysChoice("");
+    setManualGirlsChoice("");
+    try {
+      const student = await adminLookupStudentByRoll(manualRoll.trim());
+      setManualStudent(student);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setManualSearching(false);
+    }
+  }
+
+  function handleManualReset() {
+    setManualRoll("");
+    setManualStudent(null);
+    setManualBoysChoice("");
+    setManualGirlsChoice("");
+  }
+
+  async function handleManualVote() {
+    if (!manualStudent || !manualBoysChoice || !manualGirlsChoice) return;
+    const confirmed = window.confirm(
+      `Record a vote for ${manualStudent.name} (Roll ${manualStudent.rollNumber})?\n\nThis cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setNotice("");
+    setManualSubmitting(true);
+    try {
+      await adminCastManualVote({
+        rollNumber: manualStudent.rollNumber,
+        name: manualStudent.name,
+        boysCandidateId: manualBoysChoice,
+        girlsCandidateId: manualGirlsChoice,
+      });
+      setNotice(`Vote recorded manually for ${manualStudent.name}.`);
+      handleManualReset();
+      refresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setManualSubmitting(false);
+    }
+  }
+
   async function handleStartVoting() {
     setError("");
     setNotice("");
@@ -148,7 +210,7 @@ export default function AdminSettings() {
 
   async function handleClearSubmissionData() {
     const confirmed = window.confirm(
-      "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record, reset every elector's vote count to 0, and reset the voting window back to Not Started (fresh start — you'll need to click Start Voting again).\n\nThe elector names and student roster will NOT be deleted."
+      "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record and reset every elector's vote count to 0.\n\nThe elector names and student roster will NOT be deleted."
     );
     if (!confirmed) return;
 
@@ -159,7 +221,7 @@ export default function AdminSettings() {
     try {
       const result = await adminClearSubmissionData();
       setNotice(
-        `Election data cleared successfully. ${result.votersDeleted || 0} student submissions removed, ${result.electorsReset || 0} elector counts reset, and the voting window is back to a fresh start.`
+        `Election data cleared successfully. ${result.votersDeleted || 0} student submissions removed and ${result.electorsReset || 0} elector counts reset.`
       );
       await refresh();
     } catch (err) {
@@ -203,6 +265,23 @@ export default function AdminSettings() {
         </div>
       </Section>
 
+      <ManualVoteSection
+        rollNumber={manualRoll}
+        onRollChange={setManualRoll}
+        onSearch={handleManualSearch}
+        searching={manualSearching}
+        student={manualStudent}
+        onReset={handleManualReset}
+        boysOptions={candidates.boys}
+        girlsOptions={candidates.girls}
+        boysChoice={manualBoysChoice}
+        girlsChoice={manualGirlsChoice}
+        onBoysChoice={setManualBoysChoice}
+        onGirlsChoice={setManualGirlsChoice}
+        onSubmit={handleManualVote}
+        submitting={manualSubmitting}
+      />
+
       <VotingSection
         voting={voting}
         busy={votingBusy}
@@ -238,6 +317,88 @@ function CandidateList({ title, category, items, onRemove }) {
       ))}
       {items.length === 0 && <p style={{ color: "var(--text-muted)" }}>No electors yet.</p>}
     </div>
+  );
+}
+
+function ManualVoteSection({
+  rollNumber,
+  onRollChange,
+  onSearch,
+  searching,
+  student,
+  onReset,
+  boysOptions,
+  girlsOptions,
+  boysChoice,
+  girlsChoice,
+  onBoysChoice,
+  onGirlsChoice,
+  onSubmit,
+  submitting,
+}) {
+  return (
+    <Section title="Manual Vote (+1)">
+      <p style={{ marginTop: -6, marginBottom: 12, color: "var(--text-muted)", fontSize: 13.5, lineHeight: 1.5 }}>
+        For a student whose ID card couldn't be scanned. Enter their roll number (e.g. <code>10821</code>) — not
+        the student ID printed on the card — to look them up, then record their vote here.
+      </p>
+
+      <form onSubmit={onSearch} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          style={{ ...inputStyle, flex: 1, minWidth: 180 }}
+          placeholder="Roll number, e.g. 10821"
+          value={rollNumber}
+          onChange={(e) => onRollChange(e.target.value)}
+        />
+        <button style={primaryButton} type="submit" disabled={searching || !rollNumber.trim()}>
+          {searching ? "Searching…" : "Search"}
+        </button>
+      </form>
+
+      {student && (
+        <div style={{ marginTop: 16, padding: 16, border: "1px solid var(--border)", borderRadius: 12, background: "#fafbfd" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{student.name}</div>
+              <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 2 }}>
+                Roll No. {student.rollNumber} · {student.division} · {student.misId}
+              </div>
+            </div>
+            <button type="button" style={textLinkButton} onClick={onReset}>Clear</button>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+            <select style={{ ...inputStyle, flex: 1, minWidth: 180 }} value={boysChoice} onChange={(e) => onBoysChoice(e.target.value)}>
+              <option value="">Select Boys' CR</option>
+              {boysOptions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <select style={{ ...inputStyle, flex: 1, minWidth: 180 }} value={girlsChoice} onChange={(e) => onGirlsChoice(e.target.value)}>
+              <option value="">Select Girls' CR</option>
+              {girlsOptions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            style={{
+              ...primaryButton,
+              width: "100%",
+              marginTop: 12,
+              opacity: !boysChoice || !girlsChoice || submitting ? 0.55 : 1,
+              cursor: !boysChoice || !girlsChoice || submitting ? "not-allowed" : "pointer",
+            }}
+            onClick={onSubmit}
+            disabled={!boysChoice || !girlsChoice || submitting}
+          >
+            {submitting ? "Recording…" : "Record Vote"}
+          </button>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -431,3 +592,4 @@ function Centered({ children }) {
 const inputStyle = { padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "#fff", color: "var(--text)" };
 const primaryButton = { padding: "10px 18px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontWeight: 600 };
 const dangerButton = { padding: "6px 10px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", color: "var(--danger)", fontSize: 13 };
+const textLinkButton = { border: "none", background: "transparent", color: "var(--primary)", fontWeight: 600, fontSize: 13, padding: 0, cursor: "pointer" };
