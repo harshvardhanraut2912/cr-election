@@ -59,6 +59,12 @@ function adminHeaders() {
   return { Authorization: `Bearer ${token}` };
 }
 
+// Checks a token against the server's ADMIN_TOKEN without doing anything
+// else. Used by the admin/tv and admin/settings login gate — nothing on
+// those pages renders or fetches data until this resolves successfully.
+export const adminVerifyToken = (token) =>
+  request(`/admin/verify`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+
 export const adminAddCandidate = (category, name) =>
   request(`/admin/candidates`, { method: "POST", headers: adminHeaders(), body: JSON.stringify({ category, name }) });
 

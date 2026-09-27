@@ -8,6 +8,12 @@ import { startVoting, extendVoting, endVoting } from "../controllers/votingContr
 const router = Router();
 router.use(adminAuth);
 
+// Used by the admin/tv and admin/settings login screens to check a token
+// against ADMIN_TOKEN before any admin page is allowed to render or fetch
+// anything. adminAuth (above) already rejects a bad/missing token with 401,
+// so reaching this handler at all means the token is valid.
+router.post("/verify", (req, res) => res.json({ ok: true }));
+
 router.post("/candidates", addCandidate);
 router.put("/candidates/:category/:candidateId", editCandidate);
 router.delete("/candidates/:category/:candidateId", removeCandidate);

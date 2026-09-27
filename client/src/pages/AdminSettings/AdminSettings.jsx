@@ -14,9 +14,20 @@ import {
   adminCastManualVote,
 } from "../../services/api.js";
 import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
+import AdminGate from "../../components/AdminGate.jsx";
 
+// Nothing in AdminSettingsContent — including the initial getCandidates()
+// fetch — is mounted until AdminGate confirms the token against the server,
+// so no data is fetched in the background before login.
 export default function AdminSettings() {
-  const [token, setToken] = useState(localStorage.getItem("cr_election_admin_token") || "");
+  return (
+    <AdminGate title="Admin Settings">
+      <AdminSettingsContent />
+    </AdminGate>
+  );
+}
+
+function AdminSettingsContent() {
   const [candidates, setCandidates] = useState({ boys: [], girls: [] });
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -36,11 +47,6 @@ export default function AdminSettings() {
   const [manualGirlsChoice, setManualGirlsChoice] = useState("");
   const [manualSubmitting, setManualSubmitting] = useState(false);
 
-  function saveToken(t) {
-    setToken(t);
-    localStorage.setItem("cr_election_admin_token", t);
-  }
-
   async function refresh() {
     setError("");
     try {
@@ -52,9 +58,9 @@ export default function AdminSettings() {
   }
 
   useEffect(() => {
-    if (token) refresh();
+    refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -229,16 +235,6 @@ export default function AdminSettings() {
     } finally {
       setClearing(false);
     }
-  }
-
-  if (!token) {
-    return (
-      <Centered>
-        <h2>Admin Settings</h2>
-        <p style={{ color: "var(--text-muted)" }}>Enter the admin token to continue.</p>
-        <TokenForm onSubmit={saveToken} />
-      </Centered>
-    );
   }
 
   return (
@@ -562,16 +558,6 @@ function DangerSection({ title, onClear, clearing }) {
   );
 }
 
-function TokenForm({ onSubmit }) {
-  const [value, setValue] = useState("");
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit(value); }} style={{ display: "flex", gap: 8 }}>
-      <input style={inputStyle} type="password" placeholder="Admin token" value={value} onChange={(e) => setValue(e.target.value)} />
-      <button style={primaryButton} type="submit">Enter</button>
-    </form>
-  );
-}
-
 function Section({ title, children }) {
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 20, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
@@ -583,10 +569,6 @@ function Section({ title, children }) {
 
 function Box({ color, bg, children }) {
   return <div style={{ border: `1px solid ${color}`, background: bg, color, padding: 10, borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{children}</div>;
-}
-
-function Centered({ children }) {
-  return <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>{children}</div>;
 }
 
 const inputStyle = { padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "#fff", color: "var(--text)" };
