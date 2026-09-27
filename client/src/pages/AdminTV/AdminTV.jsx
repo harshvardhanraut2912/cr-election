@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLiveCandidates } from "../../hooks/useLiveCandidates.js";
 import { useDisplaySettings } from "../../hooks/useDisplaySettings.js";
 import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
@@ -9,6 +9,42 @@ function initials(name = "") {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "CR";
   return parts.slice(0, 2).map((p) => p[0]).join("").toUpperCase();
+}
+
+// How long the leaderboard shows the two winners "rising up" and celebrating
+// on their own before the full-screen results overlay takes over.
+const CHAMPION_REVEAL_MS = 5000;
+
+// Sequences the post-voting reveal purely off the current voting phase:
+// "live"/"grace"/"idle" -> normal board. The instant the doc-derived phase
+// flips to "closed" (grace period over), we start a 5s local timer during
+// which the #1 boy/girl rows celebrate in place on the board, then flip to
+// "announce" so the full winners overlay appears. Going back to "live"
+// (admin starts a new round) resets this immediately.
+function useResultsReveal(phase) {
+  const [stage, setStage] = useState("idle");
+
+  useEffect(() => {
+    if (phase !== "closed") {
+      setStage("idle");
+      return;
+    }
+    setStage("celebrate");
+    const timer = setTimeout(() => setStage("announce"), CHAMPION_REVEAL_MS);
+    return () => clearTimeout(timer);
+  }, [phase]);
+
+  return stage;
+}
+
+function ChampionConfetti() {
+  return (
+    <div className="champion-confetti" aria-hidden="true">
+      {Array.from({ length: 14 }).map((_, i) => (
+        <span key={i} className={`confetti-piece confetti-c${(i % 6) + 1}`} style={{ "--i": i }} />
+      ))}
+    </div>
+  );
 }
 
 function AnimatedNumber({ value }) {
@@ -37,7 +73,7 @@ function AnimatedNumber({ value }) {
   return <>{display}</>;
 }
 
-function Leaderboard({ title, eyebrow, rows, accent }) {
+function Leaderboard({ title, eyebrow, rows, accent, celebrate }) {
   const sorted = useMemo(
     () => [...rows].sort((a, b) => (b.votes || 0) - (a.votes || 0) || (a.order ?? 0) - (b.order ?? 0)),
     [rows]
@@ -94,23 +130,30 @@ function Leaderboard({ title, eyebrow, rows, accent }) {
           const changed = votes !== previousVote;
           previousVotes.current.set(candidate.id, votes);
           const isLeader = index === 0 && votes > 0;
+          const isChampion = celebrate && isLeader;
           const tone = toneForCandidate(candidate, index);
 
           return (
             <div
-              className={`tv-row ${isLeader ? "is-leader" : ""} ${changed ? "vote-changed" : ""}`}
+              className={`tv-row ${isLeader ? "is-leader" : ""} ${changed ? "vote-changed" : ""} ${isChampion ? "is-champion" : ""}`}
               key={candidate.id}
               ref={(node) => {
                 if (node) refs.current.set(candidate.id, node);
                 else refs.current.delete(candidate.id);
               }}
             >
+              {isChampion && <span className="champion-crown">👑</span>}
+              {isChampion && <ChampionConfetti />}
               <div className="tv-rank">{index + 1}</div>
               <div className={`tv-avatar tv-avatar-${tone}`}>{initials(candidate.name)}</div>
               <div className="tv-candidate-main">
                 <div className="tv-candidate-name-line">
                   <strong>{candidate.name}</strong>
-                  {isLeader && <span className="leader-chip">LEADING</span>}
+                  {isChampion ? (
+                    <span className="leader-chip champion-chip">WINNER 🎉</span>
+                  ) : (
+                    isLeader && <span className="leader-chip">LEADING</span>
+                  )}
                 </div>
                 <div className="tv-progress-track">
                   <span style={{ width: `${votes ? Math.max(4, (votes / maxVotes) * 100) : 0}%` }} />
@@ -145,6 +188,18 @@ function AdminTVContent() {
   const { showQr } = useDisplaySettings();
   const voting = useVotingWindow();
   const totalVotes = boys.reduce((sum, c) => sum + (c.votes || 0), 0) + girls.reduce((sum, c) => sum + (c.votes || 0), 0);
+
+  const revealStage = useResultsReveal(voting.phase); // "idle" | "celebrate" | "announce"
+  const celebrating = revealStage === "celebrate" || revealStage === "announce";
+
+  const boysWinner = useMemo(
+    () => [...boys].sort((a, b) => (b.votes || 0) - (a.votes || 0))[0] || null,
+    [boys]
+  );
+  const girlsWinner = useMemo(
+    () => [...girls].sort((a, b) => (b.votes || 0) - (a.votes || 0))[0] || null,
+    [girls]
+  );
 
   return (
     <main className="tv-page">
@@ -182,8 +237,8 @@ function AdminTVContent() {
       </header>
 
       <div className="tv-boards">
-        <Leaderboard title="Boys' CR" eyebrow="BOYS · REPRESENTATIVE" rows={boys} accent="blue" />
-        <Leaderboard title="Girls' CR" eyebrow="GIRLS · REPRESENTATIVE" rows={girls} accent="violet" />
+        <Leaderboard title="Boys' CR" eyebrow="BOYS · REPRESENTATIVE" rows={boys} accent="blue" celebrate={celebrating} />
+        <Leaderboard title="Girls' CR" eyebrow="GIRLS · REPRESENTATIVE" rows={girls} accent="violet" celebrate={celebrating} />
       </div>
 
       <footer className="tv-footer">
@@ -193,6 +248,9 @@ function AdminTVContent() {
 
       {showQr && <QrOverlay />}
       {voting.phase === "grace" && <GraceOverlay remainingMs={voting.remainingMs} />}
+      {revealStage === "announce" && (
+        <WinnerAnnouncementOverlay boysWinner={boysWinner} girlsWinner={girlsWinner} />
+      )}
     </main>
   );
 }
@@ -224,6 +282,65 @@ function GraceOverlay({ remainingMs }) {
   );
 }
 
+// Full-screen results reveal shown CHAMPION_REVEAL_MS after voting fully
+// closes (grace period included). Purely presentational — it disappears on
+// its own the moment the admin starts a new voting round, since revealStage
+// is entirely derived from the live voting phase above.
+function WinnerAnnouncementOverlay({ boysWinner, girlsWinner }) {
+  return (
+    <div className="tv-winner-overlay" role="dialog" aria-label="Election results">
+      <div className="tv-winner-backdrop" />
+      <WinnerConfettiField />
+      <div className="tv-winner-card">
+        <span className="tv-winner-eyebrow">🎉 RESULTS ARE IN 🎉</span>
+        <h2>Our Class Representatives Are</h2>
+        <div className="tv-winner-grid">
+          <WinnerSlot label="BOYS' CR" winner={boysWinner} accent="blue" />
+          <WinnerSlot label="GIRLS' CR" winner={girlsWinner} accent="violet" />
+        </div>
+        <p className="tv-winner-footnote">CONGRATULATIONS · PICT · FY-08</p>
+      </div>
+    </div>
+  );
+}
+
+function WinnerSlot({ label, winner, accent }) {
+  return (
+    <div className={`tv-winner-slot tv-winner-slot-${accent}`}>
+      <span className="tv-winner-slot-label">{label}</span>
+      {winner ? (
+        <>
+          <div className={`tv-winner-avatar tv-avatar-${accent}`}>{initials(winner.name)}</div>
+          <strong className="tv-winner-name">{winner.name}</strong>
+          <span className="tv-winner-votes">
+            {winner.votes || 0} {winner.votes === 1 ? "vote" : "votes"}
+          </span>
+        </>
+      ) : (
+        <div className="tv-winner-slot-empty">No votes recorded</div>
+      )}
+    </div>
+  );
+}
+
+function WinnerConfettiField() {
+  return (
+    <div className="winner-confetti-field" aria-hidden="true">
+      {Array.from({ length: 48 }).map((_, i) => (
+        <span
+          key={i}
+          className={`winner-confetti-piece wc-${(i % 6) + 1}`}
+          style={{
+            left: `${(i * 37) % 100}%`,
+            animationDelay: `${(i % 12) * 0.15}s`,
+            animationDuration: `${2.6 + (i % 5) * 0.3}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function QrOverlay() {
   return (
     <div className="tv-qr-overlay" role="dialog" aria-label="Student voting QR code">
@@ -236,7 +353,7 @@ function QrOverlay() {
         <div className="tv-qr-image-wrap">
           <img src="/student-vote-qr.png" alt="QR code for student voting" />
         </div>
-        <div className="tv-qr-url">https://pict-fy08.vercel.app/student/vote</div>
+        <div className="tv-qr-url">https://cr-election-git-main-cetwalle.vercel.app/student/vote</div>
         <div className="tv-qr-hint">PICT · FIRST YEAR · FY-08</div>
       </div>
     </div>
