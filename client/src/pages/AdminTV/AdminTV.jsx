@@ -130,10 +130,26 @@ function Leaderboard({ title, eyebrow, rows, accent }) {
 }
 
 export default function AdminTV() {
+  const [token, setToken] = useState(localStorage.getItem("cr_election_admin_token") || "");
   const { boys, girls } = useLiveCandidates();
   const { showQr } = useDisplaySettings();
   const voting = useVotingWindow();
   const totalVotes = boys.reduce((sum, c) => sum + (c.votes || 0), 0) + girls.reduce((sum, c) => sum + (c.votes || 0), 0);
+
+  function saveToken(t) {
+    setToken(t);
+    localStorage.setItem("cr_election_admin_token", t);
+  }
+
+  if (!token) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <h2>Admin TV</h2>
+        <p style={{ color: "var(--text-muted)" }}>Enter the admin token to continue.</p>
+        <TvTokenForm onSubmit={saveToken} />
+      </div>
+    );
+  }
 
   return (
     <main className="tv-page">
@@ -183,6 +199,18 @@ export default function AdminTV() {
       {showQr && <QrOverlay />}
       {voting.phase === "grace" && <GraceOverlay remainingMs={voting.remainingMs} />}
     </main>
+  );
+}
+
+function TvTokenForm({ onSubmit }) {
+  const [value, setValue] = useState("");
+  const inputStyle = { padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "#fff", color: "var(--text)" };
+  const primaryButton = { padding: "10px 18px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontWeight: 600 };
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSubmit(value); }} style={{ display: "flex", gap: 8 }}>
+      <input style={inputStyle} type="password" placeholder="Admin token" value={value} onChange={(e) => setValue(e.target.value)} />
+      <button style={primaryButton} type="submit">Enter</button>
+    </form>
   );
 }
 
