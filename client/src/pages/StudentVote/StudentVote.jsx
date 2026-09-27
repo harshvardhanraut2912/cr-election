@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { getDeviceToken } from "../../utils/deviceToken.js";
 import { lookupStudentByCard, validateVoter, getCandidates, castVote } from "../../services/api.js";
 import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
+import { useDisplaySettings } from "../../hooks/useDisplaySettings.js";
+import { toneForCandidate } from "../../utils/avatarTones.js";
 import CameraScanner from "./CameraScanner.jsx";
 
 const STAGES = {
@@ -27,6 +29,13 @@ export default function StudentVote() {
 
   const deviceId = useMemo(() => getDeviceToken(), []);
   const voting = useVotingWindow();
+  const { flexibleVoting } = useDisplaySettings();
+
+  // Off (default): must vote for exactly one Boys CR and one Girls CR.
+  // On: boys-only, girls-only, or both — at least one is required.
+  function hasValidSelection() {
+    return flexibleVoting ? Boolean(boysChoice || girlsChoice) : Boolean(boysChoice && girlsChoice);
+  }
 
   async function handleCardScanned(rawValue) {
     const misId = String(rawValue || "").trim().toUpperCase();
@@ -86,8 +95,12 @@ export default function StudentVote() {
       setError("Voting is closed. You can't vote now.");
       return;
     }
-    if (!boysChoice || !girlsChoice) {
-      setError("Please select one Boys CR and one Girls CR candidate.");
+    if (!hasValidSelection()) {
+      setError(
+        flexibleVoting
+          ? "Please select at least one candidate to vote for."
+          : "Please select one Boys CR and one Girls CR candidate."
+      );
       return;
     }
     setError("");
@@ -95,7 +108,7 @@ export default function StudentVote() {
   }
 
   async function handleSubmit() {
-    if (!student || !boysChoice || !girlsChoice || loading) return;
+    if (!student || !hasValidSelection() || loading) return;
     if (voting.phase !== "live" && voting.phase !== "grace") {
       setError("Voting is closed. You can't vote now.");
       return;
@@ -108,8 +121,8 @@ export default function StudentVote() {
         name: student.name,
         rollNumber: student.rollNumber,
         deviceId,
-        boysCandidateId: boysChoice,
-        girlsCandidateId: girlsChoice,
+        boysCandidateId: boysChoice || null,
+        girlsCandidateId: girlsChoice || null,
       });
       setStage(STAGES.DONE);
     } catch (err) {
@@ -152,7 +165,7 @@ export default function StudentVote() {
     return (
       <main className="vote-page vote-page-enter">
         <div className="vote-shell">
-          <ElectionHeader student={student} />
+          <ElectionHeader student={student} flexibleVoting={flexibleVoting} />
           <VotingWindowBanner voting={voting} />
           {error && <ErrorBox message={error} />}
 
@@ -162,7 +175,7 @@ export default function StudentVote() {
                 <div className="section-kicker">YOUR BALLOT</div>
                 <h2>Select your CRs</h2>
               </div>
-              <div className="ballot-progress">2 selections required</div>
+              <div className="ballot-progress">{flexibleVoting ? "Vote for at least one" : "2 selections required"}</div>
             </div>
 
             {/* Boys are intentionally shown first. */}
@@ -209,11 +222,19 @@ export default function StudentVote() {
             <div className="confirm-icon">✓</div>
             <div className="section-kicker">FINAL REVIEW</div>
             <h2>Ready to submit?</h2>
-            <p className="confirm-lead">Please check both selections. You cannot change your vote after submission.</p>
+            <p className="confirm-lead">
+              {boysChoice && girlsChoice
+                ? "Please check both selections. You cannot change your vote after submission."
+                : "Please check your selection. You cannot change your vote after submission."}
+            </p>
 
             <div className="review-grid">
-              <ReviewChoice label="Boys' CR" name={boysName} candidate={candidates.boys.find((c) => c.id === boysChoice)} tone="blue" />
-              <ReviewChoice label="Girls' CR" name={girlsName} candidate={candidates.girls.find((c) => c.id === girlsChoice)} tone="purple" />
+              {boysChoice && (
+                <ReviewChoice label="Boys' CR" name={boysName} candidate={candidates.boys.find((c) => c.id === boysChoice)} tone="blue" />
+              )}
+              {girlsChoice && (
+                <ReviewChoice label="Girls' CR" name={girlsName} candidate={candidates.girls.find((c) => c.id === girlsChoice)} tone="purple" />
+              )}
             </div>
 
             <div className={`submit-zone ${submitPulse ? "is-submitting" : ""}`}>
@@ -231,7 +252,7 @@ export default function StudentVote() {
   return <SuccessScreen student={student} />;
 }
 
-function ElectionHeader({ student, compact = false }) {
+function ElectionHeader({ student, compact = false, flexibleVoting = false }) {
   return (
     <header className={`election-header ${compact ? "compact" : ""}`}>
       <div className="election-brand-row">
@@ -245,7 +266,13 @@ function ElectionHeader({ student, compact = false }) {
       <div className="election-title-wrap">
         <div className="gradient-kicker">FIRST YEAR • FY-08</div>
         <h1>PICT College's First Year<br className="desktop-break" /> <span>FY-08 Division CR Elections</span></h1>
-        {!compact && <p>Choose one Boys' CR and one Girls' CR to represent your division.</p>}
+        {!compact && (
+          <p>
+            {flexibleVoting
+              ? "Choose a Boys' CR, a Girls' CR, or both, to represent your division."
+              : "Choose one Boys' CR and one Girls' CR to represent your division."}
+          </p>
+        )}
       </div>
       {student && (
         <div className="voter-chip">
@@ -373,13 +400,10 @@ function ElectorGroup({ title, subtitle, candidates, selected, onSelect, tone })
 }
 
 function CandidateCard({ candidate, index, selected, onSelect, tone }) {
-  const palette = tone === "blue"
-    ? ["#dbeafe", "#bfdbfe", "#e0e7ff", "#cffafe", "#dbeafe"]
-    : ["#f3e8ff", "#fce7f3", "#ede9fe", "#fae8ff", "#e0e7ff"];
-  const avatarBg = palette[index % palette.length];
+  const avatarTone = toneForCandidate(candidate, index);
   return (
     <button type="button" className={`candidate-card ${selected ? "selected" : ""}`} onClick={onSelect}>
-      <div className="candidate-avatar" style={{ background: avatarBg }}><span>{initials(candidate.name)}</span></div>
+      <div className={`candidate-avatar tv-avatar-${avatarTone}`}><span>{initials(candidate.name)}</span></div>
       <div className="candidate-copy"><strong>{candidate.name}</strong><span>Candidate {String(index + 1).padStart(2, "0")}</span></div>
       <div className={`selection-indicator ${selected ? "checked" : ""}`}>{selected ? "✓" : ""}</div>
     </button>
@@ -387,7 +411,16 @@ function CandidateCard({ candidate, index, selected, onSelect, tone }) {
 }
 
 function ReviewChoice({ label, name, candidate, tone }) {
-  return <div className={`review-choice ${tone}`}><div className="review-label">{label}</div><div className="review-person"><div className="candidate-avatar small" style={{ background: tone === "blue" ? "#dbeafe" : "#f3e8ff" }}>{initials(name)}</div><strong>{name}</strong></div></div>;
+  const avatarTone = candidate ? toneForCandidate(candidate) : tone === "blue" ? "blue" : "violet";
+  return (
+    <div className={`review-choice ${tone}`}>
+      <div className="review-label">{label}</div>
+      <div className="review-person">
+        <div className={`candidate-avatar small tv-avatar-${avatarTone}`}>{initials(name)}</div>
+        <strong>{name}</strong>
+      </div>
+    </div>
+  );
 }
 
 function SuccessScreen({ student }) {

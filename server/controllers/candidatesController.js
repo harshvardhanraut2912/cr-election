@@ -13,8 +13,8 @@ export async function getCandidates(req, res) {
       candidatesCollection("girls").orderBy("order", "asc").get(),
     ]);
     res.json({
-      boys: boysSnap.docs.map((d) => ({ id: d.id, name: d.data().name, votes: d.data().votes || 0 })),
-      girls: girlsSnap.docs.map((d) => ({ id: d.id, name: d.data().name, votes: d.data().votes || 0 })),
+      boys: boysSnap.docs.map((d) => ({ id: d.id, name: d.data().name, votes: d.data().votes || 0, order: d.data().order ?? 0 })),
+      girls: girlsSnap.docs.map((d) => ({ id: d.id, name: d.data().name, votes: d.data().votes || 0, order: d.data().order ?? 0 })),
     });
   } catch (err) {
     console.error(err);

@@ -100,6 +100,15 @@ export const adminSetQrDisplay = (showQr) =>
     body: JSON.stringify({ showQr: Boolean(showQr) }),
   });
 
+// Admin toggle: on = students may vote boys-only, girls-only, or both
+// (at least one required). Off (default) = must vote for exactly one of each.
+export const adminSetFlexibleVoting = (flexibleVoting) =>
+  request(`/admin/display/flexible-voting`, {
+    method: "PUT",
+    headers: adminHeaders(),
+    body: JSON.stringify({ flexibleVoting: Boolean(flexibleVoting) }),
+  });
+
 export const adminStartVoting = () => request(`/admin/voting/start`, { method: "POST", headers: adminHeaders() });
 
 export const adminExtendVoting = () => request(`/admin/voting/extend`, { method: "POST", headers: adminHeaders() });

@@ -3,8 +3,7 @@ import { useLiveCandidates } from "../../hooks/useLiveCandidates.js";
 import { useDisplaySettings } from "../../hooks/useDisplaySettings.js";
 import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
 import AdminGate from "../../components/AdminGate.jsx";
-
-const AVATAR_TONES = ["blue", "violet", "cyan", "rose", "amber", "emerald", "indigo", "pink"];
+import { toneForCandidate } from "../../utils/avatarTones.js";
 
 function initials(name = "") {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -95,7 +94,7 @@ function Leaderboard({ title, eyebrow, rows, accent }) {
           const changed = votes !== previousVote;
           previousVotes.current.set(candidate.id, votes);
           const isLeader = index === 0 && votes > 0;
-          const tone = AVATAR_TONES[(candidate.order ?? index) % AVATAR_TONES.length];
+          const tone = toneForCandidate(candidate, index);
 
           return (
             <div

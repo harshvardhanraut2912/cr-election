@@ -104,9 +104,24 @@ export async function castVote(req, res) {
   try {
     const { name, rollNumber, deviceId, boysCandidateId, girlsCandidateId } = req.body;
 
-    if (!name || !rollNumber || !deviceId || !boysCandidateId || !girlsCandidateId) {
+    if (!name || !rollNumber || !deviceId) {
+      return res.status(400).json({ error: "name, rollNumber and deviceId are required" });
+    }
+
+    // Admin-controlled toggle (settings/display.flexibleVoting): when off
+    // (the default), a student must pick exactly one Boys CR and one Girls
+    // CR — the original behavior. When on, a student may submit a Boys-only
+    // vote, a Girls-only vote, or both, as long as at least one is chosen.
+    const displaySettingsSnap = await db.collection("settings").doc("display").get();
+    const flexibleVoting = Boolean(displaySettingsSnap.exists && displaySettingsSnap.data()?.flexibleVoting);
+
+    if (flexibleVoting) {
+      if (!boysCandidateId && !girlsCandidateId) {
+        return res.status(400).json({ error: "Select at least one candidate to vote for." });
+      }
+    } else if (!boysCandidateId || !girlsCandidateId) {
       return res.status(400).json({
-        error: "name, rollNumber, deviceId, boysCandidateId and girlsCandidateId are all required",
+        error: "boysCandidateId and girlsCandidateId are both required",
       });
     }
 
@@ -119,8 +134,8 @@ export async function castVote(req, res) {
 
     const voterRef = db.collection("voters").doc(rollDocId(rollNumber));
     const deviceRef = db.collection("devices").doc(deviceId);
-    const boysCandidateRef = candidatesCollection("boys").doc(boysCandidateId);
-    const girlsCandidateRef = candidatesCollection("girls").doc(girlsCandidateId);
+    const boysCandidateRef = boysCandidateId ? candidatesCollection("boys").doc(boysCandidateId) : null;
+    const girlsCandidateRef = girlsCandidateId ? candidatesCollection("girls").doc(girlsCandidateId) : null;
 
     // Name-uniqueness check happens outside the transaction (Firestore transactions
     // can't mix a query read with document reads/writes cleanly here); re-checked
@@ -140,8 +155,8 @@ export async function castVote(req, res) {
       const [voterDoc, deviceDoc, boysDoc, girlsDoc] = await Promise.all([
         tx.get(voterRef),
         tx.get(deviceRef),
-        tx.get(boysCandidateRef),
-        tx.get(girlsCandidateRef),
+        boysCandidateRef ? tx.get(boysCandidateRef) : Promise.resolve(null),
+        girlsCandidateRef ? tx.get(girlsCandidateRef) : Promise.resolve(null),
       ]);
 
       if (voterDoc.exists && voterDoc.data().voted) {
@@ -150,8 +165,8 @@ export async function castVote(req, res) {
       if (deviceDoc.exists && deviceDoc.data().voted) {
         throw { status: 403, message: "This device has already been used to vote" };
       }
-      if (!boysDoc.exists) throw { status: 400, message: "Invalid Boys elector" };
-      if (!girlsDoc.exists) throw { status: 400, message: "Invalid Girls elector" };
+      if (boysCandidateRef && !boysDoc.exists) throw { status: 400, message: "Invalid Boys elector" };
+      if (girlsCandidateRef && !girlsDoc.exists) throw { status: 400, message: "Invalid Girls elector" };
 
       const votedAt = FieldValue.serverTimestamp();
 
@@ -161,8 +176,8 @@ export async function castVote(req, res) {
           name: name.trim(),
           deviceId,
           voted: true,
-          boysChoice: boysCandidateId,
-          girlsChoice: girlsCandidateId,
+          boysChoice: boysCandidateId || null,
+          girlsChoice: girlsCandidateId || null,
           votedAt,
         },
         { merge: true }
@@ -170,8 +185,8 @@ export async function castVote(req, res) {
 
       tx.set(deviceRef, { rollNumber: String(rollNumber), name: name.trim(), voted: true, votedAt }, { merge: true });
 
-      tx.update(boysCandidateRef, { votes: FieldValue.increment(1) });
-      tx.update(girlsCandidateRef, { votes: FieldValue.increment(1) });
+      if (boysCandidateRef) tx.update(boysCandidateRef, { votes: FieldValue.increment(1) });
+      if (girlsCandidateRef) tx.update(girlsCandidateRef, { votes: FieldValue.increment(1) });
     });
 
     res.json({ ok: true, message: "Vote submitted successfully" });

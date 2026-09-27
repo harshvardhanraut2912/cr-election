@@ -7,6 +7,7 @@ import {
   adminRemoveCandidate,
   adminClearSubmissionData,
   adminSetQrDisplay,
+  adminSetFlexibleVoting,
   adminStartVoting,
   adminExtendVoting,
   adminEndVoting,
@@ -34,6 +35,8 @@ function AdminSettingsContent() {
   const [clearing, setClearing] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [qrSaving, setQrSaving] = useState(false);
+  const [flexibleVoting, setFlexibleVoting] = useState(false);
+  const [flexSaving, setFlexSaving] = useState(false);
   const [votingBusy, setVotingBusy] = useState(false);
   const voting = useVotingWindow();
 
@@ -65,7 +68,10 @@ function AdminSettingsContent() {
   useEffect(() => {
     const unsubscribe = onSnapshot(
       doc(db, "settings", "display"),
-      (snap) => setShowQr(Boolean(snap.exists() && snap.data()?.showQr)),
+      (snap) => {
+        setShowQr(Boolean(snap.exists() && snap.data()?.showQr));
+        setFlexibleVoting(Boolean(snap.exists() && snap.data()?.flexibleVoting));
+      },
       () => {}
     );
     return unsubscribe;
@@ -111,6 +117,26 @@ function AdminSettingsContent() {
       setError(err.message);
     } finally {
       setQrSaving(false);
+    }
+  }
+
+  async function handleFlexibleVotingToggle(nextValue) {
+    setError("");
+    setNotice("");
+    setFlexibleVoting(nextValue);
+    setFlexSaving(true);
+    try {
+      await adminSetFlexibleVoting(nextValue);
+      setNotice(
+        nextValue
+          ? "Flexible voting enabled — students may vote boys-only, girls-only, or both."
+          : "Flexible voting disabled — students must vote for one Boys CR and one Girls CR."
+      );
+    } catch (err) {
+      setFlexibleVoting(!nextValue);
+      setError(err.message);
+    } finally {
+      setFlexSaving(false);
     }
   }
 
@@ -290,6 +316,12 @@ function AdminSettingsContent() {
         enabled={showQr}
         saving={qrSaving}
         onToggle={handleQrToggle}
+      />
+
+      <FlexibleVotingSection
+        enabled={flexibleVoting}
+        saving={flexSaving}
+        onToggle={handleFlexibleVotingToggle}
       />
 
       <DangerSection
@@ -516,6 +548,61 @@ function QrSection({ enabled, saving, onToggle }) {
       </div>
       <div style={{ marginTop: 14, fontSize: 12, fontWeight: 800, color: enabled ? "#4338ca" : "#7b8494" }}>
         {saving ? "Updating TV…" : enabled ? "ON · QR is visible on the TV now" : "OFF · TV leaderboard is visible"}
+      </div>
+    </div>
+  );
+}
+
+function FlexibleVotingSection({ enabled, saving, onToggle }) {
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #fff9f0, #fff5f5)",
+      border: "1px solid #f2e0c9",
+      borderRadius: 16,
+      padding: 20,
+      marginBottom: 20,
+      boxShadow: "0 8px 24px rgba(217, 119, 6, 0.06)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{
+              width: 40, height: 40, borderRadius: 12, display: "grid", placeItems: "center",
+              background: "linear-gradient(135deg,#d97706,#dc2626)", color: "#fff", fontWeight: 900, fontSize: 15
+            }}>1+</span>
+            <div>
+              <h3 style={{ margin: 0 }}>Allow Boys-only / Girls-only Voting</h3>
+              <p style={{ margin: "5px 0 0", color: "var(--text-muted)", lineHeight: 1.45, fontSize: 14 }}>
+                When ON, students may vote for only a Boys CR, only a Girls CR, or both — at least one is required.
+                When OFF, every student must vote for exactly one Boys CR <strong>and</strong> one Girls CR.
+              </p>
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Toggle boys-only / girls-only voting"
+          disabled={saving}
+          onClick={() => onToggle(!enabled)}
+          style={{
+            width: 68, height: 38, padding: 3, borderRadius: 999, border: "none",
+            background: enabled ? "linear-gradient(135deg,#d97706,#dc2626)" : "#d5dae3",
+            boxShadow: enabled ? "0 8px 20px rgba(220,38,38,.25)" : "inset 0 1px 2px rgba(0,0,0,.08)",
+            cursor: saving ? "wait" : "pointer", transition: "all .2s ease",
+            opacity: saving ? .65 : 1, position: "relative"
+          }}
+        >
+          <span style={{
+            display: "block", width: 32, height: 32, borderRadius: "50%", background: "#fff",
+            transform: enabled ? "translateX(30px)" : "translateX(0)", transition: "transform .22s cubic-bezier(.2,.8,.2,1)",
+            boxShadow: "0 2px 7px rgba(15,23,42,.2)"
+          }} />
+        </button>
+      </div>
+      <div style={{ marginTop: 14, fontSize: 12, fontWeight: 800, color: enabled ? "#b45309" : "#7b8494" }}>
+        {saving ? "Updating…" : enabled ? "ON · at least 1 vote required, either or both CRs" : "OFF · 1 Boys CR + 1 Girls CR required"}
       </div>
     </div>
   );
