@@ -291,6 +291,7 @@ function WinnerAnnouncementOverlay({ boysWinner, girlsWinner }) {
     <div className="tv-winner-overlay" role="dialog" aria-label="Election results">
       <div className="tv-winner-backdrop" />
       <WinnerConfettiField />
+      <div className="tv-winner-spotlight" aria-hidden="true" />
       <div className="tv-winner-card">
         <span className="tv-winner-eyebrow">🎉 RESULTS ARE IN 🎉</span>
         <h2>Our Class Representatives Are</h2>
@@ -310,7 +311,11 @@ function WinnerSlot({ label, winner, accent }) {
       <span className="tv-winner-slot-label">{label}</span>
       {winner ? (
         <>
-          <div className={`tv-winner-avatar tv-avatar-${accent}`}>{initials(winner.name)}</div>
+          <div className="tv-winner-avatar-wrap">
+            <span className="tv-winner-sparkle tv-winner-sparkle-a">✨</span>
+            <span className="tv-winner-sparkle tv-winner-sparkle-b">⭐</span>
+            <div className={`tv-winner-avatar tv-avatar-${accent}`}>{initials(winner.name)}</div>
+          </div>
           <strong className="tv-winner-name">{winner.name}</strong>
           <span className="tv-winner-votes">
             {winner.votes || 0} {winner.votes === 1 ? "vote" : "votes"}
