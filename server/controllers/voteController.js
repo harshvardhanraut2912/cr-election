@@ -1,6 +1,6 @@
 import { db, FieldValue } from "../services/firebaseAdmin.js";
 import { findStudentByCardId, findStudentByRollNumber } from "../services/studentsStore.js";
-import { getVotingDoc, computeVotingPhase } from "../services/votingWindow.js";
+import { getVotingDoc, computeVotingPhase, DEFAULT_DURATION_MINUTES } from "../services/votingWindow.js";
 
 function rollDocId(rollNumber) {
   return `roll_${String(rollNumber).trim()}`;
@@ -317,11 +317,28 @@ export async function clearSubmissionData(req, res) {
       return deleted;
     }
 
+    // Reset the voting window itself back to idle, so "Clear All Submissions"
+    // also wipes the open/closed (live/ended) state left over from a previous
+    // election run — otherwise the TV and student app keep treating voting as
+    // already started/ended even though every vote record was just deleted.
+    const votingRef = db.collection("settings").doc("voting");
+    const resetVotingWindow = votingRef.set(
+      {
+        status: "idle",
+        startedAt: null,
+        endedAt: null,
+        durationMinutes: DEFAULT_DURATION_MINUTES,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: false }
+    );
+
     const [votersDeleted, devicesDeleted, boysSnap, girlsSnap] = await Promise.all([
       deleteCollection("voters"),
       deleteCollection("devices"),
       db.collection("candidates_boys").get(),
       db.collection("candidates_girls").get(),
+      resetVotingWindow,
     ]);
 
     const resetVotes = async (snap) => {

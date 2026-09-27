@@ -242,7 +242,7 @@ function AdminSettingsContent() {
 
   async function handleClearSubmissionData() {
     const confirmed = window.confirm(
-      "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record and reset every elector's vote count to 0.\n\nThe elector names and student roster will NOT be deleted."
+      "Clear ALL submitted vote data?\n\nThis will permanently remove every student's submitted-vote record, reset every elector's vote count to 0, and reset the voting window back to not-started (any live/ended status is cleared).\n\nThe elector names and student roster will NOT be deleted."
     );
     if (!confirmed) return;
 
@@ -253,7 +253,7 @@ function AdminSettingsContent() {
     try {
       const result = await adminClearSubmissionData();
       setNotice(
-        `Election data cleared successfully. ${result.votersDeleted || 0} student submissions removed and ${result.electorsReset || 0} elector counts reset.`
+        `Election data cleared successfully. ${result.votersDeleted || 0} student submissions removed, ${result.electorsReset || 0} elector counts reset, and the voting window reset to not-started.`
       );
       await refresh();
     } catch (err) {
@@ -622,7 +622,7 @@ function DangerSection({ title, onClear, clearing }) {
         <div style={{ flex: 1, minWidth: 240 }}>
           <h3 style={{ marginTop: 0, marginBottom: 8, color: "#991b1b" }}>{title}</h3>
           <p style={{ margin: 0, color: "var(--text-muted)", lineHeight: 1.5, fontSize: 14 }}>
-            Permanently remove all submitted student vote records and reset every elector's vote count to <strong>0</strong>. Elector names and the student roster stay untouched.
+            Permanently remove all submitted student vote records, reset every elector's vote count to <strong>0</strong>, and reset the voting window to not-started (clears any live/ended status). Elector names and the student roster stay untouched.
           </p>
         </div>
         <button
