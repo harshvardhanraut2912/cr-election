@@ -93,6 +93,15 @@ export const adminCastManualVote = ({ rollNumber, name, boysCandidateId, girlsCa
     body: JSON.stringify({ rollNumber, name, boysCandidateId, girlsCandidateId }),
   });
 
+// "+1" on one elector for a student whose ID isn't in students.json (e.g. NRI
+// ID cards). misId is the F26xxxx ID typed by the admin.
+export const adminPlusOneVote = ({ category, candidateId, misId }) =>
+  request(`/admin/vote/plus-one`, {
+    method: "POST",
+    headers: adminHeaders(),
+    body: JSON.stringify({ category, candidateId, misId }),
+  });
+
 export const adminSetQrDisplay = (showQr) =>
   request(`/admin/display/qr`, {
     method: "PUT",

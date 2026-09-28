@@ -13,6 +13,7 @@ import {
   adminEndVoting,
   adminLookupStudentByRoll,
   adminCastManualVote,
+  adminPlusOneVote,
 } from "../../services/api.js";
 import { useVotingWindow, formatVotingClock } from "../../hooks/useVotingWindow.js";
 import AdminGate from "../../components/AdminGate.jsx";
@@ -98,6 +99,25 @@ function AdminSettingsContent() {
     try {
       await adminRemoveCandidate(cat, id);
       setNotice("Elector removed.");
+      refresh();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handlePlusOne(cat, candidate) {
+    const input = window.prompt(
+      `+1 vote for ${candidate.name}\n\nEnter the student's ID (e.g. F260243):`
+    );
+    if (input === null) return;
+    const misId = input.trim().toUpperCase();
+    if (!misId) return;
+
+    setError("");
+    setNotice("");
+    try {
+      await adminPlusOneVote({ category: cat, candidateId: candidate.id, misId });
+      setNotice(`+1 vote counted for ${candidate.name} (ID ${misId}).`);
       refresh();
     } catch (err) {
       setError(err.message);
@@ -282,8 +302,8 @@ function AdminSettingsContent() {
 
       <Section title="Electors">
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          <CandidateList title="Boys CR" category="boys" items={candidates.boys} onRemove={handleRemove} />
-          <CandidateList title="Girls CR" category="girls" items={candidates.girls} onRemove={handleRemove} />
+          <CandidateList title="Boys CR" category="boys" items={candidates.boys} onRemove={handleRemove} onPlusOne={handlePlusOne} />
+          <CandidateList title="Girls CR" category="girls" items={candidates.girls} onRemove={handleRemove} onPlusOne={handlePlusOne} />
         </div>
       </Section>
 
@@ -333,14 +353,17 @@ function AdminSettingsContent() {
   );
 }
 
-function CandidateList({ title, category, items, onRemove }) {
+function CandidateList({ title, category, items, onRemove, onPlusOne }) {
   return (
     <div style={{ minWidth: 260, flex: 1 }}>
       <h4>{title}</h4>
       {items.map((c) => (
         <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
           <span>{c.name} <span style={{ color: "var(--text-muted)", fontSize: 13 }}>({c.votes || 0} votes)</span></span>
-          <button style={dangerButton} onClick={() => onRemove(category, c.id)}>Remove</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button style={plusOneButton} onClick={() => onPlusOne(category, c)}>+1</button>
+            <button style={dangerButton} onClick={() => onRemove(category, c.id)}>Remove</button>
+          </div>
         </div>
       ))}
       {items.length === 0 && <p style={{ color: "var(--text-muted)" }}>No electors yet.</p>}
@@ -661,4 +684,5 @@ function Box({ color, bg, children }) {
 const inputStyle = { padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "#fff", color: "var(--text)" };
 const primaryButton = { padding: "10px 18px", borderRadius: 8, border: "none", background: "var(--primary)", color: "#fff", fontWeight: 600 };
 const dangerButton = { padding: "6px 10px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", color: "var(--danger)", fontSize: 13 };
+const plusOneButton = { padding: "6px 12px", borderRadius: 6, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#15803d", fontSize: 13, fontWeight: 700, cursor: "pointer" };
 const textLinkButton = { border: "none", background: "transparent", color: "var(--primary)", fontWeight: 600, fontSize: 13, padding: 0, cursor: "pointer" };

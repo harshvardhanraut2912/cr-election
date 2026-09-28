@@ -297,6 +297,80 @@ export async function adminCastVote(req, res) {
   }
 }
 
+// Admin: "+1" on a single elector, for a student whose ID (e.g. "F260243")
+// is NOT in students.json (NRI ID cards etc.), so we have no roll number or
+// name for them. The admin types the ID, and this counts one normal vote for
+// that elector. The ID is stored as an "incomplete data" voter record so the
+// same ID can't be counted twice for the same category (Boys / Girls). One ID
+// may still give one Boys vote and one Girls vote, via two separate +1 clicks.
+export async function adminPlusOneVote(req, res) {
+  try {
+    const { category, candidateId, misId } = req.body;
+
+    if (category !== "boys" && category !== "girls") {
+      return res.status(400).json({ error: "Invalid category" });
+    }
+    if (!candidateId) {
+      return res.status(400).json({ error: "candidateId is required" });
+    }
+
+    const cleanId = String(misId || "").trim().toUpperCase();
+    if (!/^F26\d+$/.test(cleanId)) {
+      return res.status(400).json({ error: "Enter a valid ID like F260243" });
+    }
+
+    // IDs that exist in the roster must go through the normal scan / manual-vote
+    // flow, otherwise the same student could be counted twice under two records.
+    if (findStudentByCardId(cleanId)) {
+      return res.status(409).json({
+        error: "This ID is in the student list. Use the normal scan or the Manual Vote tool for this student.",
+      });
+    }
+
+    const voterRef = db.collection("voters").doc(`nri_${cleanId}`);
+    const candidateRef = candidatesCollection(category).doc(candidateId);
+    const choiceField = category === "boys" ? "boysChoice" : "girlsChoice";
+
+    await db.runTransaction(async (tx) => {
+      const [voterDoc, candidateDoc] = await Promise.all([tx.get(voterRef), tx.get(candidateRef)]);
+
+      if (!candidateDoc.exists) throw { status: 400, message: "Invalid elector" };
+
+      if (voterDoc.exists && voterDoc.data()[choiceField]) {
+        throw {
+          status: 403,
+          message: `A ${category === "boys" ? "Boys" : "Girls"} CR vote has already been counted for ${cleanId}`,
+        };
+      }
+
+      tx.set(
+        voterRef,
+        {
+          name: `Manual entry (${cleanId})`,
+          misId: cleanId,
+          deviceId: "admin-plus-one",
+          voted: true,
+          [choiceField]: candidateId,
+          votedAt: FieldValue.serverTimestamp(),
+          castBy: "admin-plus-one",
+          incompleteData: true,
+        },
+        { merge: true }
+      );
+
+      tx.update(candidateRef, { votes: FieldValue.increment(1) });
+    });
+
+    res.json({ ok: true, message: `+1 vote recorded for ${cleanId}` });
+  } catch (err) {
+    if (err && err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: "Failed to record +1 vote" });
+  }
+}
+
 // Admin: completely reset the submitted-vote state without deleting the elector roster.
 // This removes all voter/device submission records and resets every elector's vote count to 0.
 export async function clearSubmissionData(req, res) {
